@@ -32,27 +32,42 @@ Additionally, some ISPs poison DNS responses. gecit includes a built-in DoH (DNS
 
 See [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md) for the full technical explanation.
 
-## Building
+## Installation
 
-### Requirements
+### Pre-built binaries
 
-- Go 1.21+
-- Linux: kernel 5.10+, clang, llvm-strip
-- macOS: libpcap (included with Xcode CLI tools)
+Download from [releases](https://github.com/boratanrikulu/gecit/releases):
+
+```bash
+# Linux (amd64)
+curl -L https://github.com/boratanrikulu/gecit/releases/latest/download/gecit-linux-amd64 -o gecit
+chmod +x gecit
+sudo ./gecit run
+
+# Linux (arm64)
+curl -L https://github.com/boratanrikulu/gecit/releases/latest/download/gecit-linux-arm64 -o gecit
+chmod +x gecit
+sudo ./gecit run
+
+# macOS (Apple Silicon)
+curl -L https://github.com/boratanrikulu/gecit/releases/latest/download/gecit-darwin-arm64 -o gecit
+chmod +x gecit
+sudo ./gecit run
+```
+
+### Building from source
+
+Requires Go 1.21+. Linux builds need kernel 5.10+, clang, and llvm-strip for BPF compilation. macOS builds need libpcap (included with Xcode CLI tools).
 
 ```bash
 git clone https://github.com/boratanrikulu/gecit.git
 cd gecit
 
-# Linux
-make gecit-linux-amd64    # or gecit-linux-arm64
+make gecit-linux-amd64    # Linux x86_64
+make gecit-linux-arm64    # Linux ARM64
+make gecit-darwin-arm64   # macOS Apple Silicon
 
-# macOS
-make gecit-darwin-arm64
-
-# Run
-sudo ./bin/gecit-linux-arm64 run    # Linux
-sudo ./bin/gecit-darwin-arm64 run   # macOS
+sudo ./bin/gecit-linux-arm64 run
 ```
 
 gecit sets up everything automatically:
