@@ -40,18 +40,27 @@ jobs:
             arch: amd64
             runner: ubuntu-latest
             cgo: 0
+            tags: ""
           - os: linux
             arch: arm64
             runner: ubuntu-latest
             cgo: 0
+            tags: ""
           - os: darwin
             arch: arm64
             runner: macos-latest
             cgo: 1
+            tags: with_gvisor
           - os: darwin
             arch: amd64
             runner: macos-15-intel
             cgo: 1
+            tags: with_gvisor
+          - os: windows
+            arch: amd64
+            runner: windows-latest
+            cgo: 1
+            tags: with_gvisor
 
     steps:
       - uses: actions/checkout@v4
@@ -70,19 +79,32 @@ jobs:
         if: matrix.os == 'darwin'
         run: brew install libpcap || true
 
+      - name: Install Npcap SDK (Windows)
+        if: matrix.os == 'windows'
+        run: |
+          Invoke-WebRequest -Uri "https://npcap.com/dist/npcap-sdk-1.13.zip" -OutFile npcap-sdk.zip
+          Expand-Archive npcap-sdk.zip -DestinationPath npcap-sdk
+          echo "CGO_CFLAGS=-I${{ github.workspace }}/npcap-sdk/Include" >> $env:GITHUB_ENV
+          echo "CGO_LDFLAGS=-L${{ github.workspace }}/npcap-sdk/Lib/x64" >> $env:GITHUB_ENV
+        shell: pwsh
+
       - name: Build
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
           CGO_ENABLED: ${{ matrix.cgo }}
         run: |
-          go build -ldflags="-s -w" -o gecit-${{ matrix.os }}-${{ matrix.arch }} ./cmd/gecit
+          EXT=""
+          if [ "${{ matrix.os }}" = "windows" ]; then EXT=".exe"; fi
+          TAGS=""
+          if [ -n "${{ matrix.tags }}" ]; then TAGS="-tags ${{ matrix.tags }}"; fi
+          go build -ldflags="-s -w" $TAGS -o gecit-${{ matrix.os }}-${{ matrix.arch }}${EXT} ./cmd/gecit
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
           name: gecit-${{ matrix.os }}-${{ matrix.arch }}
-          path: gecit-${{ matrix.os }}-${{ matrix.arch }}
+          path: gecit-${{ matrix.os }}-${{ matrix.arch }}*
 
   release:
     name: Create release
@@ -100,10 +122,13 @@ jobs:
         run: |
           mkdir -p release/
           for dir in artifacts/gecit-*/; do
-            name=$(basename "$dir")
-            cp "$dir/$name" "release/$name"
-            chmod +x "release/$name"
-            sha256sum "release/$name" >> release/checksums.txt
+            for file in "$dir"*; do
+              [ -f "$file" ] || continue
+              name=$(basename "$file")
+              cp "$file" "release/$name"
+              chmod +x "release/$name"
+              sha256sum "release/$name" >> release/checksums.txt
+            done
           done
 
       - name: Create GitHub Release
@@ -115,4 +140,5 @@ jobs:
             release/gecit-linux-arm64
             release/gecit-darwin-amd64
             release/gecit-darwin-arm64
+            release/gecit-windows-amd64.exe
             release/checksums.txt
