@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -27,7 +26,9 @@ func init() {
 	runCmd.Flags().Int("restore-after-bytes", 600, "restore normal MSS after N bytes (Linux only)")
 	runCmd.Flags().Int("restore-mss", 0, "restored MSS value, 0 = auto/1460 (Linux only)")
 	runCmd.Flags().String("cgroup", "/sys/fs/cgroup", "cgroup v2 path (Linux only)")
+	runCmd.Flags().BoolP("verbose", "v", false, "enable debug logging")
 
+	viper.BindPFlag("verbose", runCmd.Flags().Lookup("verbose"))
 	viper.BindPFlag("fake_ttl", runCmd.Flags().Lookup("fake-ttl"))
 	viper.BindPFlag("doh_enabled", runCmd.Flags().Lookup("doh"))
 	viper.BindPFlag("doh_upstream", runCmd.Flags().Lookup("doh-upstream"))
@@ -40,12 +41,15 @@ func init() {
 }
 
 func runEngine(cmd *cobra.Command, args []string) error {
-	if os.Geteuid() != 0 {
-		return fmt.Errorf("gecit requires root privileges — run with sudo")
+	if err := checkPrivileges(); err != nil {
+		return err
 	}
 
 	logger := logrus.New()
 	logger.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
+	if viper.GetBool("verbose") {
+		logger.SetLevel(logrus.DebugLevel)
+	}
 
 	cfg := engine.Config{
 		MSS:               viper.GetInt("mss"),

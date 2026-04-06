@@ -1,4 +1,4 @@
-//go:build amd64
+//go:build linux && amd64
 
 package ebpf
 
