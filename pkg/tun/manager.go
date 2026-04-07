@@ -178,7 +178,10 @@ func (m *Manager) startSeqTracker() error {
 // monitor. These are required by sing-tun's AutoRoute for loop prevention.
 func (m *Manager) initNetworking() error {
 	m.ifaceFinder = control.NewDefaultInterfaceFinder()
-	physIface := detectPhysicalInterface()
+	physIface := m.cfg.Interface
+	if physIface == "" {
+		physIface = detectPhysicalInterface()
+	}
 	m.bindControl = control.Append(nil, control.BindToInterface(m.ifaceFinder, physIface, -1))
 
 	var err error
