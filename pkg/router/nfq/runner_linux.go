@@ -64,21 +64,23 @@ func (r *Runner) Start(ctx context.Context) error {
 	return r.queue.RegisterWithErrorFunc(ctx, r.handlePacket, r.handleError)
 }
 
-// Stop closes the queue and the raw socket.
+// Stop closes the queue and the raw socket. Both resources are always
+// closed even if one of them returns an error.
 func (r *Runner) Stop() error {
+	var firstErr error
 	if r.queue != nil {
 		if err := r.queue.Close(); err != nil {
-			return err
+			firstErr = err
 		}
 		r.queue = nil
 	}
 	if r.rawSock != nil {
-		if err := r.rawSock.Close(); err != nil {
-			return err
+		if err := r.rawSock.Close(); err != nil && firstErr == nil {
+			firstErr = err
 		}
 		r.rawSock = nil
 	}
-	return nil
+	return firstErr
 }
 
 func (r *Runner) openRawSocket() error {

@@ -1,6 +1,7 @@
 package rawsock
 
 import (
+	"crypto/rand"
 	"encoding/binary"
 	"net"
 	"syscall"
@@ -36,10 +37,15 @@ func BuildPacket(conn ConnInfo, payload []byte, ttl int) []byte {
 	pkt = append(pkt, payload...)
 
 	// Compute TCP checksum (pseudo-header + TCP header + payload).
+	srcIP4 := conn.SrcIP.To4()
+	dstIP4 := conn.DstIP.To4()
+	if srcIP4 == nil || dstIP4 == nil {
+		return nil // IPv6 not supported for raw packet building
+	}
 	tcpChecksumOffset := len(ipHdr) + 16
 	checksumData := make([]byte, 0, 12+len(tcpHdr)+len(payload))
-	checksumData = append(checksumData, conn.SrcIP.To4()...)
-	checksumData = append(checksumData, conn.DstIP.To4()...)
+	checksumData = append(checksumData, srcIP4...)
+	checksumData = append(checksumData, dstIP4...)
 	checksumData = append(checksumData, 0, syscall.IPPROTO_TCP)
 	tcpLenBuf := make([]byte, 2)
 	binary.BigEndian.PutUint16(tcpLenBuf, uint16(len(tcpHdr)+len(payload)))
@@ -57,11 +63,16 @@ func buildIPHeader(conn ConnInfo, ttl int, payloadLen int) []byte {
 	hdr := make([]byte, 20)
 	hdr[0] = 0x45                                 // Version=4, IHL=5
 	ipHeaderPutUint16(hdr[2:4], uint16(totalLen)) // Total length (byte order is platform-dependent)
-	ipHeaderPutUint16(hdr[4:6], 0x1234)           // ID
+	ipHeaderPutUint16(hdr[4:6], randomIPID())     // ID — randomized to avoid DPI fingerprinting
 	hdr[8] = byte(ttl)                            // TTL
 	hdr[9] = syscall.IPPROTO_TCP                  // Protocol
-	copy(hdr[12:16], conn.SrcIP.To4())
-	copy(hdr[16:20], conn.DstIP.To4())
+	srcIP4 := conn.SrcIP.To4()
+	dstIP4 := conn.DstIP.To4()
+	if srcIP4 == nil || dstIP4 == nil {
+		return nil // caller must validate; nil header signals unsupported IP version
+	}
+	copy(hdr[12:16], srcIP4)
+	copy(hdr[16:20], dstIP4)
 	// IP header checksum — required for pcap_sendpacket (kernel won't fill it).
 	cs := Checksum(hdr)
 	hdr[10] = byte(cs >> 8)
@@ -75,10 +86,20 @@ func buildTCPHeader(conn ConnInfo) []byte {
 	binary.BigEndian.PutUint16(hdr[2:4], conn.DstPort)
 	binary.BigEndian.PutUint32(hdr[4:8], conn.Seq)
 	binary.BigEndian.PutUint32(hdr[8:12], conn.Ack)
-	hdr[12] = 0x50 // Data offset: 5 (20 bytes)
-	hdr[13] = 0x18 // Flags: PSH+ACK
-	binary.BigEndian.PutUint16(hdr[14:16], 502)
+	hdr[12] = 0x50                                // Data offset: 5 (20 bytes)
+	hdr[13] = 0x18                                // Flags: PSH+ACK
+	binary.BigEndian.PutUint16(hdr[14:16], 64240) // Window — matches typical Linux/Chrome initial window
 	return hdr
+}
+
+// randomIPID returns a crypto-random 16-bit IP identification value.
+// Falls back to 0 if crypto/rand fails (kernel will usually overwrite anyway).
+func randomIPID() uint16 {
+	var buf [2]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return 0
+	}
+	return binary.BigEndian.Uint16(buf[:])
 }
 
 // Checksum computes the Internet checksum (RFC 1071).

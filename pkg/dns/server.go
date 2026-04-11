@@ -24,8 +24,9 @@ var globalDNS *Server
 func GetDNSServer() *Server { return globalDNS }
 
 const (
-	ipQueueEntryTTL = 30 * time.Second
-	ipQueueMaxPerIP = 16
+	ipQueueEntryTTL    = 30 * time.Second
+	ipQueueMaxPerIP    = 16
+	ipQueueMaxDistinct = 4096 // upper bound on distinct IPs tracked
 )
 
 type queuedDomain struct {
@@ -156,6 +157,11 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 				q = append(q, queuedDomain{domain: domain, addedAt: now})
 				if len(q) > ipQueueMaxPerIP {
 					q = q[len(q)-ipQueueMaxPerIP:]
+				}
+				// If the map already has too many distinct IPs and this
+				// is a brand-new key, skip it to bound memory growth.
+				if _, exists := s.ipQueue[ip]; !exists && len(s.ipQueue) >= ipQueueMaxDistinct {
+					continue
 				}
 				s.ipQueue[ip] = q
 			}

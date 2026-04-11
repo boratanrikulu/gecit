@@ -14,7 +14,6 @@ import (
 type pcapCapture struct {
 	handle *pcap.Handle
 	ports  map[uint16]bool
-	seen   map[uint16]bool // dedup by src port (one fake per connection)
 	mu     sync.Mutex
 	done   chan struct{}
 }
@@ -41,7 +40,6 @@ func NewCapture(iface string, ports []uint16) (Detector, error) {
 	return &pcapCapture{
 		handle: handle,
 		ports:  portMap,
-		seen:   make(map[uint16]bool),
 		done:   make(chan struct{}),
 	}, nil
 }

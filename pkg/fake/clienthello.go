@@ -103,9 +103,17 @@ var clientHelloProfiles = []ClientHelloProfile{
 
 var clientHelloCounter atomic.Uint64
 
-// TLSClientHello is a deterministic default payload kept for tests and
-// compatibility. Production code should use RandomTLSClientHello().
-var TLSClientHello = buildClientHello(clientHelloProfiles[0], false, 1)
+// tlsClientHelloDefault is the lazily-built deterministic payload for tests.
+var tlsClientHelloDefault = buildClientHello(clientHelloProfiles[0], false, 1)
+
+// TLSClientHello returns a deterministic default payload kept for tests and
+// compatibility. The returned slice is a fresh copy, safe to mutate.
+// Production code should use RandomTLSClientHello().
+func TLSClientHello() []byte {
+	out := make([]byte, len(tlsClientHelloDefault))
+	copy(out, tlsClientHelloDefault)
+	return out
+}
 
 // RandomTLSClientHello rotates through several fake fingerprints and varies the
 // client random / session ID so each connection is less fingerprintable.

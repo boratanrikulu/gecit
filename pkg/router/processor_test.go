@@ -10,7 +10,7 @@ import (
 )
 
 func TestParsePacketIPv4TCP(t *testing.T) {
-	packet := buildIPv4TCPPacket(t, fake.TLSClientHello)
+	packet := buildIPv4TCPPacket(t, fake.TLSClientHello())
 
 	meta, err := ParsePacket(packet)
 	if err != nil {
@@ -40,7 +40,7 @@ func TestProcessorInjectsOncePerFlow(t *testing.T) {
 		t.Fatalf("NewProcessor() error = %v", err)
 	}
 
-	packet := buildIPv4TCPPacket(t, fake.TLSClientHello)
+	packet := buildIPv4TCPPacket(t, fake.TLSClientHello())
 
 	first, err := processor.ProcessPacket(packet, 0)
 	if err != nil {
@@ -91,7 +91,7 @@ func TestProcessorSkipsMarkedAndNonClientHelloTraffic(t *testing.T) {
 }
 
 func TestLooksLikeTLSClientHello(t *testing.T) {
-	if !LooksLikeTLSClientHello(fake.TLSClientHello) {
+	if !LooksLikeTLSClientHello(fake.TLSClientHello()) {
 		t.Fatal("expected deterministic fake clienthello to match")
 	}
 	if LooksLikeTLSClientHello([]byte("hello")) {

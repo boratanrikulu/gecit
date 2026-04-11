@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+const maxDoHResponseBytes = 65535
+
 type Preset struct {
 	URL string
 }
@@ -43,6 +45,7 @@ type DoHClient struct {
 	upstream string
 	name     string
 	client   *http.Client
+	initErr  error
 }
 
 func NewDoHClient(upstream string, name string, dial DialFunc) *DoHClient {
@@ -51,39 +54,54 @@ func NewDoHClient(upstream string, name string, dial DialFunc) *DoHClient {
 		transport.DialContext = dial
 	}
 
-	// If upstream has a hostname (not IP), resolve it now before gecit
-	// takes over system DNS. Replace hostname with IP in URL, set TLS SNI.
-	parsed, err := url.Parse(upstream)
-	if err == nil {
-		host := parsed.Hostname()
-		if net.ParseIP(host) == nil {
-			if ips, err := net.LookupIP(host); err == nil {
-				for _, ip := range ips {
-					if ip4 := ip.To4(); ip4 != nil {
-						port := parsed.Port()
-						if port == "" {
-							port = "443"
-						}
-						parsed.Host = net.JoinHostPort(ip4.String(), port)
-						upstream = parsed.String()
-						transport.TLSClientConfig = &tls.Config{ServerName: host}
-						break
-					}
-				}
-			}
-		}
-	}
-
-	return &DoHClient{
+	client := &DoHClient{
 		upstream: upstream,
 		name:     name,
 		client:   &http.Client{Timeout: 5 * time.Second, Transport: transport},
 	}
+
+	// If upstream has a hostname (not IP), resolve it now before gecit
+	// takes over system DNS. Replace hostname with IP in URL, set TLS SNI.
+	parsed, err := url.Parse(upstream)
+	if err != nil {
+		client.initErr = fmt.Errorf("parse DoH upstream %q: %w", upstream, err)
+		return client
+	}
+	if parsed.Scheme != "https" {
+		client.initErr = fmt.Errorf("DoH upstream must use https: %q", upstream)
+		return client
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		client.initErr = fmt.Errorf("DoH upstream host is empty: %q", upstream)
+		return client
+	}
+	if net.ParseIP(host) == nil {
+		if ips, err := net.LookupIP(host); err == nil {
+			for _, ip := range ips {
+				if ip4 := ip.To4(); ip4 != nil {
+					port := parsed.Port()
+					if port == "" {
+						port = "443"
+					}
+					parsed.Host = net.JoinHostPort(ip4.String(), port)
+					client.upstream = parsed.String()
+					transport.TLSClientConfig = &tls.Config{ServerName: host}
+					break
+				}
+			}
+		}
+	}
+	return client
 }
 
 func (d *DoHClient) Name() string { return d.name }
 
 func (d *DoHClient) Resolve(query []byte) (ResolveResult, error) {
+	if d.initErr != nil {
+		return ResolveResult{}, d.initErr
+	}
+
 	req, err := http.NewRequest("POST", d.upstream, bytes.NewReader(query))
 	if err != nil {
 		return ResolveResult{}, fmt.Errorf("create request: %w", err)
@@ -101,9 +119,16 @@ func (d *DoHClient) Resolve(query []byte) (ResolveResult, error) {
 		return ResolveResult{}, fmt.Errorf("DoH status: %d", resp.StatusCode)
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	if resp.ContentLength > maxDoHResponseBytes {
+		return ResolveResult{}, fmt.Errorf("DoH response too large: %d bytes", resp.ContentLength)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDoHResponseBytes+1))
 	if err != nil {
 		return ResolveResult{}, err
+	}
+	if len(data) > maxDoHResponseBytes {
+		return ResolveResult{}, fmt.Errorf("DoH response too large")
 	}
 	return ResolveResult{Data: data, Via: d.name}, nil
 }

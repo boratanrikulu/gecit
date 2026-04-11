@@ -73,23 +73,33 @@ func (p *Processor) ProcessPacket(packet []byte, mark uint32) (Action, error) {
 		return Action{Reason: "flow already handled or flow table full"}, nil
 	}
 
+	conn, ok := packetToConnInfo(meta)
+	if !ok {
+		return Action{Reason: "failed to convert IPs to IPv4"}, nil
+	}
+
 	return Action{
 		Inject:      true,
-		Conn:        packetToConnInfo(meta),
+		Conn:        conn,
 		FakePayload: p.fakePayload(),
 		Reason:      "inject fake clienthello before queued handshake",
 	}, nil
 }
 
-func packetToConnInfo(meta PacketMeta) rawsock.ConnInfo {
+func packetToConnInfo(meta PacketMeta) (rawsock.ConnInfo, bool) {
+	srcIP4 := meta.SrcIP.To4()
+	dstIP4 := meta.DstIP.To4()
+	if srcIP4 == nil || dstIP4 == nil {
+		return rawsock.ConnInfo{}, false
+	}
 	return rawsock.ConnInfo{
-		SrcIP:   append([]byte{}, meta.SrcIP.To4()...),
-		DstIP:   append([]byte{}, meta.DstIP.To4()...),
+		SrcIP:   append([]byte{}, srcIP4...),
+		DstIP:   append([]byte{}, dstIP4...),
 		SrcPort: meta.SrcPort,
 		DstPort: meta.DstPort,
 		Seq:     meta.TCP.Seq,
 		Ack:     meta.TCP.Ack,
-	}
+	}, true
 }
 
 func portAllowed(port uint16, ports []uint16) bool {

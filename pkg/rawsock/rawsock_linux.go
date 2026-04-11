@@ -25,9 +25,16 @@ func New() (RawSocket, error) {
 
 func (s *platformRawSocket) SendFake(conn ConnInfo, payload []byte, ttl int) error {
 	pkt := BuildPacket(conn, payload, ttl)
+	if pkt == nil {
+		return fmt.Errorf("BuildPacket failed: IPs must be IPv4")
+	}
 
+	dstIP4 := conn.DstIP.To4()
+	if dstIP4 == nil {
+		return fmt.Errorf("SendFake: destination is not IPv4")
+	}
 	addr := syscall.SockaddrInet4{Port: 0}
-	copy(addr.Addr[:], conn.DstIP.To4())
+	copy(addr.Addr[:], dstIP4)
 
 	return syscall.Sendto(s.fd, pkt, 0, &addr)
 }

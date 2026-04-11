@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 
 	gecitdns "github.com/boratanrikulu/gecit/pkg/dns"
 	"github.com/boratanrikulu/gecit/pkg/engine"
@@ -67,11 +68,21 @@ func (e *tunEngine) Start(ctx context.Context) error {
 }
 
 func (e *tunEngine) Stop() error {
-	e.mgr.Stop()
+	var errs []error
+	if err := e.mgr.Stop(); err != nil {
+		errs = append(errs, fmt.Errorf("tun manager stop: %w", err))
+	}
 	if e.dohEnabled {
-		gecitdns.RestoreSystemDNS()
-		e.dns.Stop()
+		if err := gecitdns.RestoreSystemDNS(); err != nil {
+			errs = append(errs, fmt.Errorf("restore system DNS: %w", err))
+		}
+		if err := e.dns.Stop(); err != nil {
+			errs = append(errs, fmt.Errorf("dns server stop: %w", err))
+		}
 		resumeSystemDNS()
+	}
+	if len(errs) > 0 {
+		return errs[0] // return first error; others are logged via caller
 	}
 	return nil
 }

@@ -65,7 +65,7 @@ func ParsePacket(packet []byte) (PacketMeta, error) {
 
 // FlowKey returns a stable key for first-packet gating.
 func (m PacketMeta) FlowKey() string {
-	return fmt.Sprintf("%d|%s|%s|%d|%d", m.IPVersion, m.Protocol, m.SrcIP, m.SrcPort, m.DstPort)
+	return fmt.Sprintf("%d|%s|%s|%s|%d|%d", m.IPVersion, m.Protocol, m.SrcIP, m.DstIP, m.SrcPort, m.DstPort)
 }
 
 // LooksLikeTLSClientHello performs a small, conservative check before injection.
@@ -85,6 +85,10 @@ func LooksLikeTLSClientHello(payload []byte) bool {
 
 	recordLen := int(binary.BigEndian.Uint16(payload[3:5]))
 	if recordLen < 4 {
+		return false
+	}
+	// Ensure the declared record length doesn't exceed what we actually have.
+	if 5+recordLen > len(payload) {
 		return false
 	}
 

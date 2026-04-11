@@ -6,7 +6,7 @@ import (
 )
 
 func TestTLSClientHello_RecordLayer(t *testing.T) {
-	ch := TLSClientHello
+	ch := TLSClientHello()
 
 	if len(ch) < 5 {
 		t.Fatalf("ClientHello too short: %d bytes", len(ch))
@@ -27,7 +27,7 @@ func TestTLSClientHello_RecordLayer(t *testing.T) {
 }
 
 func TestTLSClientHello_HandshakeType(t *testing.T) {
-	ch := TLSClientHello
+	ch := TLSClientHello()
 
 	if ch[5] != 0x01 {
 		t.Fatalf("handshake type: got 0x%02x, want 0x01 (ClientHello)", ch[5])
@@ -40,7 +40,7 @@ func TestTLSClientHello_HandshakeType(t *testing.T) {
 }
 
 func TestTLSClientHello_ClientVersion(t *testing.T) {
-	ch := TLSClientHello
+	ch := TLSClientHello()
 
 	if ch[9] != 0x03 || ch[10] != 0x03 {
 		t.Fatalf("client version: got 0x%02x%02x, want 0x0303 (TLS 1.2)", ch[9], ch[10])
@@ -48,7 +48,7 @@ func TestTLSClientHello_ClientVersion(t *testing.T) {
 }
 
 func TestTLSClientHello_SNI(t *testing.T) {
-	ch := TLSClientHello
+	ch := TLSClientHello()
 	sni := []byte("www.google.com")
 
 	if !bytes.Contains(ch, sni) {
@@ -58,8 +58,20 @@ func TestTLSClientHello_SNI(t *testing.T) {
 
 func TestTLSClientHello_Deterministic(t *testing.T) {
 	a := buildClientHello(clientHelloProfiles[0], false, 1)
-	if !bytes.Equal(a, TLSClientHello) {
+	if !bytes.Equal(a, TLSClientHello()) {
 		t.Fatal("TLSClientHello should stay deterministic")
+	}
+}
+
+func TestTLSClientHello_ReturnsCopy(t *testing.T) {
+	a := TLSClientHello()
+	b := TLSClientHello()
+	if len(a) == 0 || len(b) == 0 {
+		t.Fatal("TLSClientHello should not return empty payload")
+	}
+	a[0] ^= 0xff
+	if a[0] == b[0] {
+		t.Fatal("TLSClientHello results must not share backing memory")
 	}
 }
 

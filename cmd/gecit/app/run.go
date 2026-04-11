@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -51,11 +52,16 @@ func runEngine(cmd *cobra.Command, args []string) error {
 		logger.SetLevel(logrus.DebugLevel)
 	}
 
+	ports, err := toUint16Slice(viper.GetIntSlice("ports"))
+	if err != nil {
+		return err
+	}
+
 	cfg := engine.Config{
 		MSS:               viper.GetInt("mss"),
 		RestoreMSS:        viper.GetInt("restore_mss"),
 		RestoreAfterBytes: viper.GetInt("restore_after_bytes"),
-		Ports:             toUint16Slice(viper.GetIntSlice("ports")),
+		Ports:             ports,
 		Interface:         viper.GetString("interface"),
 		CgroupPath:        viper.GetString("cgroup_path"),
 		FakeTTL:           viper.GetInt("fake_ttl"),
@@ -85,10 +91,13 @@ func runEngine(cmd *cobra.Command, args []string) error {
 	return eng.Stop()
 }
 
-func toUint16Slice(ints []int) []uint16 {
-	out := make([]uint16, len(ints))
-	for i, v := range ints {
-		out[i] = uint16(v)
+func toUint16Slice(ints []int) ([]uint16, error) {
+	out := make([]uint16, 0, len(ints))
+	for _, v := range ints {
+		if v <= 0 || v > 65535 {
+			return nil, fmt.Errorf("invalid --ports value %d (must be 1-65535)", v)
+		}
+		out = append(out, uint16(v))
 	}
-	return out
+	return out, nil
 }

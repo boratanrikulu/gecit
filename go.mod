@@ -1,9 +1,10 @@
 module github.com/boratanrikulu/gecit
 
-go 1.26.1
+go 1.26.2
 
 require (
 	github.com/cilium/ebpf v0.21.0
+	github.com/florianl/go-nfqueue/v2 v2.0.2
 	github.com/google/gopacket v1.1.19
 	github.com/miekg/dns v1.1.72
 	github.com/sagernet/sing v0.8.4
@@ -15,7 +16,6 @@ require (
 )
 
 require (
-	github.com/florianl/go-nfqueue/v2 v2.0.2 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
