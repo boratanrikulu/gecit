@@ -3,11 +3,17 @@
 package app
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/boratanrikulu/gecit/pkg/router"
+	"github.com/boratanrikulu/gecit/pkg/router/nfq"
 	"github.com/boratanrikulu/gecit/pkg/router/probe"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
@@ -15,6 +21,11 @@ var (
 	routerCmd = &cobra.Command{
 		Use:   "router",
 		Short: "Experimental Linux/OpenWrt router-mode tooling",
+	}
+	routerRunCmd = &cobra.Command{
+		Use:   "run",
+		Short: "Start the experimental NFQUEUE router-mode worker",
+		RunE:  runRouterEngine,
 	}
 	routerPlanCmd = &cobra.Command{
 		Use:   "plan",
@@ -31,7 +42,9 @@ var (
 func init() {
 	addRouterFlags(routerPlanCmd)
 	addRouterFlags(routerProbeCmd)
+	addRouterFlags(routerRunCmd)
 
+	routerCmd.AddCommand(routerRunCmd)
 	routerCmd.AddCommand(routerPlanCmd)
 	routerCmd.AddCommand(routerProbeCmd)
 	rootCmd.AddCommand(routerCmd)
@@ -50,6 +63,7 @@ func addRouterFlags(cmd *cobra.Command) {
 	cmd.Flags().Int("fake-ttl", 8, "TTL for generated fake packets")
 	cmd.Flags().Int("max-flows", 4096, "maximum number of tracked flows")
 	cmd.Flags().StringSlice("targets", nil, "probe target hostnames")
+	cmd.Flags().BoolP("verbose", "v", false, "enable debug logging")
 }
 
 func runRouterPlan(cmd *cobra.Command, args []string) error {
@@ -82,6 +96,59 @@ func runRouterProbe(cmd *cobra.Command, args []string) error {
 
 	_, err = fmt.Fprint(cmd.OutOrStdout(), dryRun.Text())
 	return err
+}
+
+func runRouterEngine(cmd *cobra.Command, args []string) error {
+	if err := checkPrivileges(); err != nil {
+		return err
+	}
+
+	cfg, err := routerConfigFromFlags(cmd)
+	if err != nil {
+		return err
+	}
+	cfg = cfg.Normalized()
+	logger := logrus.New()
+	logger.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
+	if verbose, _ := cmd.Flags().GetBool("verbose"); verbose {
+		logger.SetLevel(logrus.DebugLevel)
+	}
+
+	runner, err := nfq.NewRunner(cfg, logger)
+	if err != nil {
+		return err
+	}
+	defer runner.Stop()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runner.Start(ctx)
+	}()
+
+	logger.WithFields(logrus.Fields{
+		"queue": cfg.QueueNum,
+		"wan":   cfg.WANInterface,
+	}).Info("experimental router worker started; install rules with `gecit router plan` output")
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			return err
+		}
+	case <-sigCh:
+		cancel()
+		if err := <-errCh; err != nil && err != context.Canceled {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func routerConfigFromFlags(cmd *cobra.Command) (router.Config, error) {

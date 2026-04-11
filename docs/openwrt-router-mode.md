@@ -46,9 +46,11 @@ This document tracks a router-wide mode for OpenWrt and similar Linux gateways. 
 
 - `pkg/router/config.go` defines the future config surface.
 - `pkg/router/engine.go` validates config and exposes dry-run ruleset rendering.
+- `pkg/router/packet.go` and `pkg/router/processor.go` parse queued packets and decide when a fake should be injected once per flow.
 - `pkg/router/nftables.go` renders nftables setup and teardown commands for an NFQUEUE path.
+- `pkg/router/nfq/runner_linux.go` consumes NFQUEUE packets and reuses the existing raw socket sender for low-TTL fake packets.
 - `pkg/router/probe/probe.go` and `pkg/router/probe/dryrun.go` define a small blockcheck-style dry-run workflow.
-- `cmd/gecit/app/router_linux.go` wires experimental Linux commands for `router plan` and `router probe`.
+- `cmd/gecit/app/router_linux.go` wires experimental Linux commands for `router run`, `router plan`, and `router probe`.
 
 ## Detailed TODOs
 
