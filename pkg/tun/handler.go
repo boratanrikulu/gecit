@@ -1,4 +1,4 @@
-//go:build (darwin || windows) && with_gvisor
+//go:build darwin || windows
 
 package tun
 

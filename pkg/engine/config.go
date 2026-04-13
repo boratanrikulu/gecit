@@ -6,6 +6,7 @@ type Config struct {
 	RestoreAfterBytes int      `yaml:"restore_after_bytes" mapstructure:"restore_after_bytes"`
 	Ports             []uint16 `yaml:"ports" mapstructure:"ports"`
 	Interface         string   `yaml:"interface" mapstructure:"interface"`
+	TunStack          string   `yaml:"tun_stack" mapstructure:"tun_stack"`
 	CgroupPath        string   `yaml:"cgroup_path" mapstructure:"cgroup_path"`
 	FakeTTL           int      `yaml:"fake_ttl" mapstructure:"fake_ttl"`
 	DoHEnabled        bool     `yaml:"doh_enabled" mapstructure:"doh_enabled"`
@@ -18,6 +19,7 @@ func DefaultConfig() Config {
 		RestoreMSS:        0,
 		RestoreAfterBytes: 600,
 		Ports:             []uint16{443},
+		TunStack:          "auto",
 		CgroupPath:        "/sys/fs/cgroup",
 		FakeTTL:           8,
 		DoHEnabled:        true,

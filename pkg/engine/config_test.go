@@ -16,6 +16,7 @@ func TestDefaultConfig(t *testing.T) {
 		{"FakeTTL", cfg.FakeTTL, 8},
 		{"DoHEnabled", cfg.DoHEnabled, true},
 		{"DoHUpstream", cfg.DoHUpstream, "cloudflare"},
+		{"TunStack", cfg.TunStack, "auto"},
 		{"CgroupPath", cfg.CgroupPath, "/sys/fs/cgroup"},
 	}
 
