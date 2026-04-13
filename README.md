@@ -87,6 +87,14 @@ curl -L https://github.com/boratanrikulu/gecit/releases/latest/download/gecit-wi
 gecit.exe run
 ```
 
+Verify release provenance with GitHub artifact attestations:
+
+```bash
+gh attestation verify ./gecit-linux-amd64 -R boratanrikulu/gecit
+```
+
+This checks that the binary was produced by this repository's GitHub Actions workflow. You can also verify `checksums.txt` the same way after downloading a release.
+
 ### Building from source
 
 Requires Go 1.24+. Linux builds need kernel 5.10+, clang, and llvm-strip for BPF compilation. Windows builds need [Npcap SDK](https://npcap.com/guide/npcap-devguide.html).

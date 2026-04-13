@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const breadcrumbFile = "/tmp/gecit-dns-backup"
+const breadcrumbFile = "/var/run/gecit-dns-backup"
 
 var savedDNS string
 var savedService string
@@ -69,7 +69,7 @@ func SetSystemDNS(networkService ...string) error {
 		if strings.Contains(savedDNS, "aren't any") {
 			content = "empty"
 		}
-		os.WriteFile(breadcrumbFile, []byte(content+"\n"+svc+"\n"), 0644)
+		os.WriteFile(breadcrumbFile, []byte(content+"\n"+svc+"\n"), 0600)
 	}
 
 	out, err = exec.Command("networksetup", "-setdnsservers", svc, "127.0.0.1").CombinedOutput()

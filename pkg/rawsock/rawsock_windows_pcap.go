@@ -84,7 +84,7 @@ func discoverMACs() (srcMAC, dstMAC net.HardwareAddr) {
 // gatewayMAC finds the default gateway's MAC address from the ARP table.
 func gatewayMAC(localIP net.IP) net.HardwareAddr {
 	// Find default gateway IP.
-	out, err := exec.Command("cmd", "/c", "route", "print", "0.0.0.0").CombinedOutput()
+	out, err := exec.Command("route", "print", "0.0.0.0").CombinedOutput()
 	if err != nil {
 		return nil
 	}

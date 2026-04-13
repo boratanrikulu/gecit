@@ -68,6 +68,9 @@ func runEngine(cmd *cobra.Command, args []string) error {
 		DoHEnabled:        viper.GetBool("doh_enabled"),
 		DoHUpstream:       viper.GetString("doh_upstream"),
 	}
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 
 	eng, err := newPlatformEngine(cfg, logger)
 	if err != nil {

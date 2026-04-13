@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -49,7 +50,12 @@ type DoHClient struct {
 }
 
 func NewDoHClient(upstream string, name string, dial DialFunc) *DoHClient {
-	transport := &http.Transport{Proxy: nil}
+	transport := &http.Transport{
+		Proxy: nil,
+		TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		},
+	}
 	if dial != nil {
 		transport.DialContext = dial
 	}
@@ -57,25 +63,21 @@ func NewDoHClient(upstream string, name string, dial DialFunc) *DoHClient {
 	client := &DoHClient{
 		upstream: upstream,
 		name:     name,
-		client:   &http.Client{Timeout: 5 * time.Second, Transport: transport},
+		client: &http.Client{
+			Timeout:       5 * time.Second,
+			Transport:     transport,
+			CheckRedirect: rejectRedirects,
+		},
 	}
 
 	// If upstream has a hostname (not IP), resolve it now before gecit
 	// takes over system DNS. Replace hostname with IP in URL, set TLS SNI.
-	parsed, err := url.Parse(upstream)
+	parsed, err := validateDoHURL(upstream)
 	if err != nil {
-		client.initErr = fmt.Errorf("parse DoH upstream %q: %w", upstream, err)
-		return client
-	}
-	if parsed.Scheme != "https" {
-		client.initErr = fmt.Errorf("DoH upstream must use https: %q", upstream)
+		client.initErr = err
 		return client
 	}
 	host := parsed.Hostname()
-	if host == "" {
-		client.initErr = fmt.Errorf("DoH upstream host is empty: %q", upstream)
-		return client
-	}
 	if net.ParseIP(host) == nil {
 		if ips, err := net.LookupIP(host); err == nil {
 			for _, ip := range ips {
@@ -86,7 +88,7 @@ func NewDoHClient(upstream string, name string, dial DialFunc) *DoHClient {
 					}
 					parsed.Host = net.JoinHostPort(ip4.String(), port)
 					client.upstream = parsed.String()
-					transport.TLSClientConfig = &tls.Config{ServerName: host}
+					transport.TLSClientConfig.ServerName = host
 					break
 				}
 			}
@@ -163,14 +165,71 @@ func NewResolver(upstreams string, dial DialFunc) Resolver {
 	var clients []Resolver
 	for _, u := range strings.Split(upstreams, ",") {
 		u = strings.TrimSpace(u)
+		if u == "" {
+			continue
+		}
 		if p, ok := Presets[u]; ok {
 			clients = append(clients, NewDoHClient(p.URL, u, dial))
 		} else {
 			clients = append(clients, NewDoHClient(u, u, dial))
 		}
 	}
+	if len(clients) == 0 {
+		return NewDoHClient("", "", dial)
+	}
 	if len(clients) == 1 {
 		return clients[0]
 	}
 	return &fallbackResolver{clients: clients}
+}
+
+func ValidateUpstreams(upstreams string) error {
+	seen := 0
+	for _, u := range strings.Split(upstreams, ",") {
+		u = strings.TrimSpace(u)
+		if u == "" {
+			continue
+		}
+		if p, ok := Presets[u]; ok {
+			u = p.URL
+		}
+		if _, err := validateDoHURL(u); err != nil {
+			return err
+		}
+		seen++
+	}
+	if seen == 0 {
+		return fmt.Errorf("at least one DoH upstream is required")
+	}
+	return nil
+}
+
+func validateDoHURL(upstream string) (*url.URL, error) {
+	parsed, err := url.Parse(upstream)
+	if err != nil {
+		return nil, fmt.Errorf("parse DoH upstream %q: %w", upstream, err)
+	}
+	if parsed.Scheme != "https" {
+		return nil, fmt.Errorf("DoH upstream must use https: %q", upstream)
+	}
+	if parsed.Hostname() == "" {
+		return nil, fmt.Errorf("DoH upstream host is empty: %q", upstream)
+	}
+	if parsed.User != nil {
+		return nil, fmt.Errorf("DoH upstream must not include userinfo: %q", upstream)
+	}
+	if parsed.Fragment != "" {
+		return nil, fmt.Errorf("DoH upstream must not include fragments: %q", upstream)
+	}
+	if port := parsed.Port(); port != "" {
+		num, err := strconv.Atoi(port)
+		if err != nil || num < 1 || num > 65535 {
+			return nil, fmt.Errorf("DoH upstream port is invalid: %q", upstream)
+		}
+	}
+	return parsed, nil
+}
+
+func rejectRedirects(req *http.Request, via []*http.Request) error {
+	return http.ErrUseLastResponse
 }

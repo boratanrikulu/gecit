@@ -10,7 +10,7 @@ import (
 func platformCleanup() bool {
 	cleaned := false
 
-	if data, err := os.ReadFile("/tmp/gecit-dns-backup"); err == nil {
+	if data, err := os.ReadFile("/var/run/gecit-dns-backup"); err == nil {
 		lines := strings.SplitN(string(data), "\n", 3)
 		svc := "Wi-Fi"
 		if len(lines) >= 2 && strings.TrimSpace(lines[1]) != "" {
@@ -25,7 +25,7 @@ func platformCleanup() bool {
 			args := append([]string{"-setdnsservers", svc}, strings.Fields(prev)...)
 			exec.Command("networksetup", args...).CombinedOutput()
 		}
-		os.Remove("/tmp/gecit-dns-backup")
+		os.Remove("/var/run/gecit-dns-backup")
 		cleaned = true
 	}
 
