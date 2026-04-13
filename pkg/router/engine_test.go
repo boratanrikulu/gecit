@@ -116,3 +116,22 @@ func TestEngineStartRollsBackOnImmediateRunnerFailure(t *testing.T) {
 		t.Fatalf("rollback batch missing delete table: %s", applied[1])
 	}
 }
+
+func TestEngineDryRunBackendStartsWithoutSystemHooks(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.WANInterface = "wan"
+	cfg.Backend = QueueBackendDryRun
+
+	eng := New(cfg)
+	eng.startupGracePeriod = 5 * time.Millisecond
+
+	if got := eng.Mode(); got != "router-dryrun" {
+		t.Fatalf("Mode() = %q, want router-dryrun", got)
+	}
+	if err := eng.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := eng.Stop(); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+}

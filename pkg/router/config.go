@@ -12,6 +12,7 @@ type QueueBackend string
 
 const (
 	QueueBackendNFQueue QueueBackend = "nfqueue"
+	QueueBackendDryRun  QueueBackend = "dryrun"
 )
 
 // Config is the planned configuration surface for a router-wide mode.
@@ -98,7 +99,9 @@ func (c Config) Normalized() Config {
 func (c Config) Validate() error {
 	c = c.Normalized()
 
-	if c.Backend != QueueBackendNFQueue {
+	switch c.Backend {
+	case QueueBackendNFQueue, QueueBackendDryRun:
+	default:
 		return fmt.Errorf("unsupported router backend %q", c.Backend)
 	}
 	if c.WANInterface == "" {

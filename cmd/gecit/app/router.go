@@ -1,5 +1,3 @@
-//go:build linux
-
 package app
 
 import (
@@ -7,8 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
-	"syscall"
 
 	"github.com/boratanrikulu/gecit/pkg/router"
 	"github.com/boratanrikulu/gecit/pkg/router/probe"
@@ -19,11 +17,11 @@ import (
 var (
 	routerCmd = &cobra.Command{
 		Use:   "router",
-		Short: "Experimental Linux/OpenWrt router-mode tooling",
+		Short: "Experimental router-mode tooling",
 	}
 	routerRunCmd = &cobra.Command{
 		Use:   "run",
-		Short: "Start the experimental NFQUEUE router-mode worker",
+		Short: "Start the router-mode worker",
 		RunE:  runRouterEngine,
 	}
 	routerPlanCmd = &cobra.Command{
@@ -53,6 +51,7 @@ func addRouterFlags(cmd *cobra.Command) {
 	cmd.Flags().String("wan", "", "WAN interface name (required)")
 	cmd.Flags().StringSlice("lan", nil, "LAN interface names")
 	cmd.Flags().String("table", "", "nftables table name")
+	cmd.Flags().String("backend", string(router.QueueBackendNFQueue), "router backend: nfqueue or dryrun")
 	cmd.Flags().Uint("queue-num", 0, "NFQUEUE number")
 	cmd.Flags().Uint32("mark", 0, "packet mark for generated packets")
 	cmd.Flags().IntSlice("tcp-ports", []int{443}, "TCP ports to intercept")
@@ -98,15 +97,21 @@ func runRouterProbe(cmd *cobra.Command, args []string) error {
 }
 
 func runRouterEngine(cmd *cobra.Command, args []string) error {
-	if err := checkPrivileges(); err != nil {
-		return err
-	}
-
 	cfg, err := routerConfigFromFlags(cmd)
 	if err != nil {
 		return err
 	}
 	cfg = cfg.Normalized()
+
+	if cfg.Backend == router.QueueBackendNFQueue && runtime.GOOS != "linux" {
+		return router.ErrRouterUnsupported
+	}
+	if cfg.Backend != router.QueueBackendDryRun {
+		if err := checkPrivileges(); err != nil {
+			return err
+		}
+	}
+
 	logger := logrus.New()
 	logger.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
 	if verbose, _ := cmd.Flags().GetBool("verbose"); verbose {
@@ -122,14 +127,20 @@ func runRouterEngine(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	logger.WithField("mode", eng.Mode()).Info("gecit router is running - press Ctrl+C to stop")
+
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigCh, os.Interrupt)
 	<-sigCh
 	cancel()
 	return eng.Stop()
 }
 
 func routerConfigFromFlags(cmd *cobra.Command) (router.Config, error) {
+	backendName, err := cmd.Flags().GetString("backend")
+	if err != nil {
+		return router.Config{}, err
+	}
 	queueNum, err := cmd.Flags().GetUint("queue-num")
 	if err != nil {
 		return router.Config{}, err
@@ -179,6 +190,7 @@ func routerConfigFromFlags(cmd *cobra.Command) (router.Config, error) {
 		WANInterface:  wanInterface,
 		LANInterfaces: lanInterfaces,
 		TableName:     tableName,
+		Backend:       router.QueueBackend(strings.TrimSpace(strings.ToLower(backendName))),
 		QueueNum:      uint16(queueNum),
 		PacketMark:    packetMark,
 		TCPPorts:      intSliceToPorts(tcpPorts),

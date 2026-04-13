@@ -31,6 +31,16 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
+func TestConfigValidateAcceptsDryRunBackend(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.WANInterface = "wan"
+	cfg.Backend = QueueBackendDryRun
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
 func TestConfigValidateRejectsInvalidValues(t *testing.T) {
 	tests := []struct {
 		name string

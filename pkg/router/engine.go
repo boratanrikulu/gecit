@@ -12,7 +12,7 @@ import (
 
 var (
 	ErrAlreadyRunning    = errors.New("router engine already running")
-	ErrRouterUnsupported = errors.New("router mode is only supported on Linux")
+	ErrRouterUnsupported = errors.New("router nfqueue backend is only supported on Linux")
 )
 
 type lifecycleRunner interface {
@@ -23,8 +23,25 @@ type lifecycleRunner interface {
 type runnerFactory func(Config, *logrus.Logger) (lifecycleRunner, error)
 type batchApplier func(context.Context, string) error
 
-// Engine manages the Linux router-mode lifecycle: nftables state plus the
-// NFQUEUE worker that emits fake packets.
+type idleRunner struct{}
+
+func (idleRunner) Start(ctx context.Context) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (idleRunner) Stop() error { return nil }
+
+func dryRunRunnerFactory(_ Config, _ *logrus.Logger) (lifecycleRunner, error) {
+	return idleRunner{}, nil
+}
+
+func dryRunBatchApplier(_ context.Context, _ string) error {
+	return nil
+}
+
+// Engine manages router-mode lifecycle: either the Linux NFQUEUE data path
+// or a cross-platform dry-run backend that avoids touching system state.
 type Engine struct {
 	cfg                Config
 	logger             *logrus.Logger
@@ -50,13 +67,20 @@ func NewWithLogger(cfg Config, logger *logrus.Logger) *Engine {
 	if logger == nil {
 		logger = logrus.New()
 	}
-	return &Engine{
-		cfg:                cfg.Normalized(),
+	cfg = cfg.Normalized()
+
+	eng := &Engine{
+		cfg:                cfg,
 		logger:             logger,
 		newRunner:          defaultRunnerFactory,
 		applyBatch:         defaultBatchApplier,
 		startupGracePeriod: 150 * time.Millisecond,
 	}
+	if cfg.Backend == QueueBackendDryRun {
+		eng.newRunner = dryRunRunnerFactory
+		eng.applyBatch = dryRunBatchApplier
+	}
+	return eng
 }
 
 // Start validates config, installs nftables state, and launches the NFQUEUE worker.
@@ -118,11 +142,17 @@ func (e *Engine) Start(ctx context.Context) error {
 		}
 		return err
 	case <-time.After(grace):
-		e.logger.WithFields(logrus.Fields{
-			"queue": e.cfg.QueueNum,
-			"wan":   e.cfg.WANInterface,
-			"table": rules.TableName,
-		}).Info("router mode active")
+		fields := logrus.Fields{
+			"backend": e.cfg.Backend,
+			"wan":     e.cfg.WANInterface,
+			"table":   rules.TableName,
+		}
+		if e.cfg.Backend == QueueBackendNFQueue {
+			fields["queue"] = e.cfg.QueueNum
+			e.logger.WithFields(fields).Info("router mode active")
+		} else {
+			e.logger.WithFields(fields).Info("router dry run active")
+		}
 		return nil
 	}
 }
@@ -184,7 +214,7 @@ func (e *Engine) Stop() error {
 
 // Mode returns the router backend name.
 func (e *Engine) Mode() string {
-	return "router-nfqueue"
+	return "router-" + string(e.cfg.Backend)
 }
 
 // Config exposes the current normalized config.
