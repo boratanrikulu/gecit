@@ -11,14 +11,12 @@ func platformCleanup() bool {
 	cleaned := false
 
 	// 1. Remove stale TUN routes.
-	// Check if gecit routes exist by looking for 0.0.0.0/1 route to TUN IP.
 	if out, err := exec.Command("route", "print", "0.0.0.0").CombinedOutput(); err == nil {
-		if strings.Contains(string(out), "10.0.85.1") {
+		if commands := staleRouteDeleteCommands(string(out)); len(commands) > 0 {
 			fmt.Println("removing stale routes...")
-			exec.Command("route", "delete", "0.0.0.0", "mask", "128.0.0.0").CombinedOutput()
-			exec.Command("route", "delete", "128.0.0.0", "mask", "128.0.0.0").CombinedOutput()
-			exec.Command("route", "delete", "1.1.1.1").CombinedOutput()
-			exec.Command("route", "delete", "8.8.8.8").CombinedOutput()
+			for _, args := range commands {
+				exec.Command(args[0], args[1:]...).CombinedOutput()
+			}
 			cleaned = true
 		}
 	}
@@ -45,4 +43,18 @@ func platformCleanup() bool {
 	}
 
 	return cleaned
+}
+
+func staleRouteDeleteCommands(routePrint string) [][]string {
+	if !strings.Contains(routePrint, "10.0.85.1") && !strings.Contains(routePrint, "10.0.85.2") {
+		return nil
+	}
+
+	return [][]string{
+		{"route", "delete", "0.0.0.0", "mask", "0.0.0.0", "10.0.85.2"},
+		{"route", "delete", "0.0.0.0", "mask", "128.0.0.0"},
+		{"route", "delete", "128.0.0.0", "mask", "128.0.0.0"},
+		{"route", "delete", "1.1.1.1"},
+		{"route", "delete", "8.8.8.8"},
+	}
 }

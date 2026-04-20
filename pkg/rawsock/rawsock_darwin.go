@@ -24,7 +24,14 @@ func New() (RawSocket, error) {
 }
 
 func (s *platformRawSocket) SendFake(conn ConnInfo, payload []byte, ttl int) error {
+	if connIPFamily(conn) != ipFamilyIPv4 {
+		return fmt.Errorf("raw IPv6 injection is not supported on darwin")
+	}
+
 	pkt := BuildPacket(conn, payload, ttl)
+	if len(pkt) == 0 {
+		return fmt.Errorf("invalid IP family or address pair")
+	}
 
 	addr := syscall.SockaddrInet4{Port: 0}
 	copy(addr.Addr[:], conn.DstIP.To4())

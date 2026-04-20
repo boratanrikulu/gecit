@@ -204,3 +204,66 @@ func TestBuildPacket_DifferentTTL(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildPacket_IPv6HeaderAndPayload(t *testing.T) {
+	conn := ConnInfo{
+		SrcIP:   net.ParseIP("2001:db8::1"),
+		DstIP:   net.ParseIP("2001:db8::2"),
+		SrcPort: 12345,
+		DstPort: 443,
+		Seq:     1000,
+		Ack:     2000,
+	}
+	payload := []byte("ipv6-test-payload")
+	ttl := 8
+
+	pkt := BuildPacket(conn, payload, ttl)
+	if len(pkt) < 60+len(payload) {
+		t.Fatalf("packet too short: %d bytes", len(pkt))
+	}
+	if pkt[0]>>4 != 6 {
+		t.Fatalf("IP version: got %d, want 6", pkt[0]>>4)
+	}
+	if pkt[6] != 6 {
+		t.Fatalf("next header: got %d, want 6", pkt[6])
+	}
+	if pkt[7] != byte(ttl) {
+		t.Fatalf("hop limit: got %d, want %d", pkt[7], ttl)
+	}
+	if !net.IP(pkt[8:24]).Equal(conn.SrcIP.To16()) {
+		t.Fatalf("src IP: got %v, want %v", net.IP(pkt[8:24]), conn.SrcIP)
+	}
+	if !net.IP(pkt[24:40]).Equal(conn.DstIP.To16()) {
+		t.Fatalf("dst IP: got %v, want %v", net.IP(pkt[24:40]), conn.DstIP)
+	}
+	if string(pkt[60:]) != string(payload) {
+		t.Fatalf("payload: got %q, want %q", pkt[60:], payload)
+	}
+}
+
+func TestBuildPacket_IPv6TCPChecksum(t *testing.T) {
+	conn := ConnInfo{
+		SrcIP:   net.ParseIP("2001:db8::1"),
+		DstIP:   net.ParseIP("2001:db8::2"),
+		SrcPort: 12345,
+		DstPort: 443,
+		Seq:     1000,
+		Ack:     2000,
+	}
+	payload := []byte("test")
+
+	pkt := BuildPacket(conn, payload, 8)
+	tcpSeg := pkt[40:]
+	pseudo := make([]byte, 0, 40+len(tcpSeg))
+	pseudo = append(pseudo, conn.SrcIP.To16()...)
+	pseudo = append(pseudo, conn.DstIP.To16()...)
+	tcpLen := make([]byte, 4)
+	binary.BigEndian.PutUint32(tcpLen, uint32(len(tcpSeg)))
+	pseudo = append(pseudo, tcpLen...)
+	pseudo = append(pseudo, 0, 0, 0, 6)
+	pseudo = append(pseudo, tcpSeg...)
+
+	if cs := Checksum(pseudo); cs != 0 {
+		t.Fatalf("TCP checksum verification failed: got 0x%04x, want 0x0000", cs)
+	}
+}

@@ -22,6 +22,7 @@ func init() {
 	runCmd.Flags().Int("fake-ttl", 8, "TTL for fake packets (reaches DPI, not server)")
 	runCmd.Flags().Bool("doh", true, "enable built-in DoH DNS resolver")
 	runCmd.Flags().String("doh-upstream", "cloudflare", "DoH upstream: preset (cloudflare,google,quad9,nextdns,adguard) or URL")
+	runCmd.Flags().String("tun-stack", "auto", "darwin/windows TUN stack: auto, system, gvisor, mixed")
 	runCmd.Flags().Int("mss", 40, "TCP MSS for ClientHello fragmentation (Linux only)")
 	runCmd.Flags().Int("restore-after-bytes", 600, "restore normal MSS after N bytes (Linux only)")
 	runCmd.Flags().Int("restore-mss", 0, "restored MSS value, 0 = auto/1460 (Linux only)")
@@ -32,6 +33,7 @@ func init() {
 	viper.BindPFlag("fake_ttl", runCmd.Flags().Lookup("fake-ttl"))
 	viper.BindPFlag("doh_enabled", runCmd.Flags().Lookup("doh"))
 	viper.BindPFlag("doh_upstream", runCmd.Flags().Lookup("doh-upstream"))
+	viper.BindPFlag("tun_stack", runCmd.Flags().Lookup("tun-stack"))
 	viper.BindPFlag("mss", runCmd.Flags().Lookup("mss"))
 	viper.BindPFlag("restore_after_bytes", runCmd.Flags().Lookup("restore-after-bytes"))
 	viper.BindPFlag("restore_mss", runCmd.Flags().Lookup("restore-mss"))
@@ -57,6 +59,7 @@ func runEngine(cmd *cobra.Command, args []string) error {
 		RestoreAfterBytes: viper.GetInt("restore_after_bytes"),
 		Ports:             toUint16Slice(viper.GetIntSlice("ports")),
 		Interface:         viper.GetString("interface"),
+		TunStack:          viper.GetString("tun_stack"),
 		CgroupPath:        viper.GetString("cgroup_path"),
 		FakeTTL:           viper.GetInt("fake_ttl"),
 		DoHEnabled:        viper.GetBool("doh_enabled"),

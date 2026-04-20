@@ -47,6 +47,7 @@ func (st *SeqTracker) Stop() {
 }
 
 var globalSeqTracker *SeqTracker
+var fallbackWarnOnce sync.Once
 
 func SetSeqTracker(st *SeqTracker) {
 	globalSeqTracker = st
@@ -66,7 +67,10 @@ func GetSeqAck(conn net.Conn) (seq, ack uint32) {
 
 	evt := globalSeqTracker.WaitForSeqAck(localPort, 500*time.Millisecond)
 	if evt == nil {
-		logrus.WithField("port", localPort).Warn("seq/ack fallback — Npcap may not be capturing")
+		fallbackWarnOnce.Do(func() {
+			logrus.Warn("seq/ack fallback active — Windows capture path missed SYN/ACK, using default sequence numbers")
+		})
+		logrus.WithField("port", localPort).Debug("seq/ack fallback used for this flow")
 		return 1, 1
 	}
 

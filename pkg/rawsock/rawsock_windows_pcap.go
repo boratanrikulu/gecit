@@ -18,30 +18,38 @@ type pcapRawSocket struct {
 	dstMAC net.HardwareAddr
 }
 
-func New() (RawSocket, error) {
+func tryPcapRawSocket() (RawSocket, error, bool) {
 	iface, err := defaultInterface()
 	if err != nil {
-		return nil, fmt.Errorf("detect interface: %w", err)
+		return nil, fmt.Errorf("detect interface: %w", err), true
 	}
 
 	handle, err := pcap.OpenLive(iface, 0, false, 100*time.Millisecond)
 	if err != nil {
-		return nil, fmt.Errorf("pcap open %s: %w (is Npcap installed?)", iface, err)
+		return nil, fmt.Errorf("pcap open %s: %w (is Npcap installed?)", iface, err), true
 	}
 
 	srcMAC, dstMAC := discoverMACs()
 
-	return &pcapRawSocket{handle: handle, srcMAC: srcMAC, dstMAC: dstMAC}, nil
+	return &pcapRawSocket{handle: handle, srcMAC: srcMAC, dstMAC: dstMAC}, nil, true
 }
 
 func (s *pcapRawSocket) SendFake(conn ConnInfo, payload []byte, ttl int) error {
 	ipTcp := BuildPacket(conn, payload, ttl)
+	if len(ipTcp) == 0 {
+		return fmt.Errorf("invalid IP family or address pair")
+	}
 
 	frame := make([]byte, 14+len(ipTcp))
 	copy(frame[0:6], s.dstMAC)
 	copy(frame[6:12], s.srcMAC)
-	frame[12] = 0x08
-	frame[13] = 0x00
+	if connIPFamily(conn) == ipFamilyIPv6 {
+		frame[12] = 0x86
+		frame[13] = 0xdd
+	} else {
+		frame[12] = 0x08
+		frame[13] = 0x00
+	}
 	copy(frame[14:], ipTcp)
 
 	return s.handle.WritePacketData(frame)

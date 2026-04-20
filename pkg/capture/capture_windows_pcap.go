@@ -19,26 +19,26 @@ type pcapCapture struct {
 	done   chan struct{}
 }
 
-func NewCapture(iface string, ports []uint16) (Detector, error) {
+func tryPcapCapture(iface string, ports []uint16) (Detector, error, bool) {
 	if !NpcapAvailable() {
-		return nil, fmt.Errorf("Npcap not installed — required for DPI bypass on Windows (download from npcap.com)")
+		return nil, fmt.Errorf("Npcap not installed — required for pcap capture on Windows (download from npcap.com)"), true
 	}
 
 	// Windows pcap needs device path (\Device\NPF_{GUID}), not friendly name.
 	pcapDev, err := resolvePcapDevice(iface)
 	if err != nil {
-		return nil, err
+		return nil, err, true
 	}
 
 	handle, err := pcap.OpenLive(pcapDev, 68, false, 100*time.Millisecond)
 	if err != nil {
-		return nil, fmt.Errorf("pcap open %s: %w", iface, err)
+		return nil, fmt.Errorf("pcap open %s: %w", iface, err), true
 	}
 
 	filter := "tcp src port 443 and tcp[tcpflags] & (tcp-syn|tcp-ack) = (tcp-syn|tcp-ack)"
 	if err := handle.SetBPFFilter(filter); err != nil {
 		handle.Close()
-		return nil, fmt.Errorf("set BPF filter: %w", err)
+		return nil, fmt.Errorf("set BPF filter: %w", err), true
 	}
 
 	portMap := make(map[uint16]bool)
@@ -50,7 +50,7 @@ func NewCapture(iface string, ports []uint16) (Detector, error) {
 		handle: handle,
 		ports:  portMap,
 		done:   make(chan struct{}),
-	}, nil
+	}, nil, true
 }
 
 func (c *pcapCapture) Start(cb Callback) error {

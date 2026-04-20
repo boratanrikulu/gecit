@@ -1,4 +1,4 @@
-//go:build (darwin || windows) && with_gvisor
+//go:build darwin || windows
 
 package tun
 
@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"runtime"
+	"strings"
 	"time"
 
-	"github.com/boratanrikulu/gecit/pkg/seqtrack"
 	"github.com/boratanrikulu/gecit/pkg/rawsock"
+	"github.com/boratanrikulu/gecit/pkg/seqtrack"
 	"github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/control"
 	singlog "github.com/sagernet/sing/common/logger"
@@ -23,6 +25,7 @@ type Config struct {
 	Ports     []uint16
 	FakeTTL   int
 	Interface string
+	Stack     string
 }
 
 type Manager struct {
@@ -38,6 +41,7 @@ type Manager struct {
 	bindControl    control.Func
 	networkMonitor tun.NetworkUpdateMonitor
 	ifaceMonitor   tun.DefaultInterfaceMonitor
+	stackName      string
 }
 
 func NewManager(cfg Config, logger *logrus.Logger) *Manager {
@@ -46,6 +50,9 @@ func NewManager(cfg Config, logger *logrus.Logger) *Manager {
 	}
 	if len(cfg.Ports) == 0 {
 		cfg.Ports = []uint16{443}
+	}
+	if strings.TrimSpace(cfg.Stack) == "" {
+		cfg.Stack = "auto"
 	}
 	ports := make(map[uint16]bool)
 	for _, p := range cfg.Ports {
@@ -76,6 +83,13 @@ func (m *Manager) Start(ctx context.Context) error {
 		return err
 	}
 
+	stackName, err := selectStackName(m.cfg.Stack)
+	if err != nil {
+		m.rawSock.Close()
+		return err
+	}
+	m.stackName = stackName
+
 	tunOpts := m.tunOptions()
 	tunDevice, err := tun.New(tunOpts)
 	if err != nil {
@@ -87,7 +101,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	tunName, _ := tunDevice.Name()
 	m.logger.WithField("name", tunName).Info("TUN device created")
 
-	stack, err := tun.NewStack("gvisor", tun.StackOptions{
+	stack, err := tun.NewStack(stackName, tun.StackOptions{
 		Context:                m.ctx,
 		Tun:                    tunDevice,
 		TunOptions:             tunOpts,
@@ -119,6 +133,7 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	m.logger.WithFields(logrus.Fields{
 		"tun":   tunName,
+		"stack": stackName,
 		"ports": m.cfg.Ports,
 		"ttl":   m.cfg.FakeTTL,
 	}).Info("TUN engine active")
@@ -173,6 +188,19 @@ func (m *Manager) DialContext(ctx context.Context, network, addr string) (net.Co
 	return (&net.Dialer{Timeout: 5 * time.Second, Control: ctrl}).DialContext(ctx, network, addr)
 }
 
+func (m *Manager) StackName() string {
+	if m.stackName != "" {
+		return m.stackName
+	}
+	if normalized := strings.TrimSpace(strings.ToLower(m.cfg.Stack)); normalized != "" && normalized != "auto" {
+		return normalized
+	}
+	if tun.WithGVisor {
+		return "gvisor"
+	}
+	return "system"
+}
+
 func (m *Manager) startSeqTracker() error {
 	iface := m.cfg.Interface
 	if iface == "" {
@@ -223,31 +251,59 @@ func (m *Manager) initNetworking() error {
 
 func (m *Manager) tunOptions() tun.Options {
 	return tun.Options{
-		Name:             "utun85",
+		Name:             platformTunName(),
 		Inet4Address:     []netip.Prefix{netip.MustParsePrefix("10.0.85.1/30")},
 		MTU:              tunMTU,
 		AutoRoute:        true,
 		InterfaceMonitor: m.ifaceMonitor,
 		InterfaceFinder:  m.ifaceFinder,
-		DNSServers: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
+		DNSServers:       []netip.Addr{netip.MustParseAddr("127.0.0.1")},
 	}
 }
 
+func selectStackName(raw string) (string, error) {
+	stack := strings.TrimSpace(strings.ToLower(raw))
+	switch stack {
+	case "", "auto":
+		if tun.WithGVisor {
+			return "gvisor", nil
+		}
+		return "system", nil
+	case "system":
+		return "system", nil
+	case "gvisor", "mixed":
+		if !tun.WithGVisor {
+			return "", fmt.Errorf("%s stack requires build tag with_gvisor", stack)
+		}
+		return stack, nil
+	default:
+		return "", fmt.Errorf("unknown TUN stack %q", raw)
+	}
+}
+
+func platformTunName() string {
+	if runtime.GOOS == "windows" {
+		return "gecit"
+	}
+	return "utun85"
+}
+
 func detectPhysicalInterface() string {
+	if runtime.GOOS == "windows" {
+		if iface := detectWindowsPhysicalInterface(); iface != "" {
+			return iface
+		}
+	}
+	return detectGenericPhysicalInterface()
+}
+
+func detectGenericPhysicalInterface() string {
 	ifaces, _ := net.Interfaces()
 	for _, iface := range ifaces {
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
 			continue
 		}
-		name := iface.Name
-		// Skip virtual interfaces (TUN, bridge, veth, etc.)
-		for _, prefix := range []string{"utun", "bridge", "veth", "vmnet", "lo"} {
-			if len(name) >= len(prefix) && name[:len(prefix)] == prefix {
-				name = ""
-				break
-			}
-		}
-		if name == "" {
+		if isVirtualInterfaceName(iface.Name) {
 			continue
 		}
 		addrs, _ := iface.Addrs()
@@ -257,10 +313,45 @@ func detectPhysicalInterface() string {
 				continue
 			}
 			if ipv4 := ipNet.IP.To4(); ipv4 != nil && !ipv4.IsLoopback() && !ipv4.Equal(net.IPv4(10, 0, 85, 1)) {
-				return name
+				return iface.Name
 			}
 		}
 	}
 	return ""
 }
 
+func isVirtualInterfaceName(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	for _, prefix := range []string{
+		"utun",
+		"bridge",
+		"veth",
+		"vmnet",
+		"lo",
+		"vethernet",
+		"loopback",
+		"wintun",
+		"docker",
+		"br-",
+		"virbr",
+		"zt",
+		"tailscale",
+	} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	for _, fragment := range []string{
+		"default switch",
+		"hyper-v",
+		"wsl",
+		"virtual",
+		"npcap",
+		"wireguard",
+	} {
+		if strings.Contains(lower, fragment) {
+			return true
+		}
+	}
+	return false
+}

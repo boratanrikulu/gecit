@@ -72,7 +72,7 @@ func GetSeqAck(conn net.Conn) (seq, ack uint32) {
 	// (typically <10ms after Dial). 500ms is a safe upper bound.
 	evt := globalSeqTracker.WaitForSeqAck(localPort, 500*time.Millisecond)
 	if evt == nil {
-		logrus.WithField("port", localPort).Warn("seq/ack fallback to placeholder — fake may be rejected by DPI")
+		logrus.WithField("port", localPort).Warn("seq/ack capture unavailable — fake may be rejected by DPI")
 		return 1, 1
 	}
 
