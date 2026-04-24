@@ -11,8 +11,8 @@ import (
 
 	gecitdns "github.com/boratanrikulu/gecit/pkg/dns"
 	"github.com/boratanrikulu/gecit/pkg/fake"
-	"github.com/boratanrikulu/gecit/pkg/seqtrack"
 	"github.com/boratanrikulu/gecit/pkg/rawsock"
+	"github.com/boratanrikulu/gecit/pkg/seqtrack"
 	singtun "github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/buf"
 	M "github.com/sagernet/sing/common/metadata"
@@ -80,7 +80,7 @@ func (h *handler) injectAndForward(appConn, serverConn net.Conn, dst string) {
 		dst = fmt.Sprintf("%s:%d", sni, serverConn.RemoteAddr().(*net.TCPAddr).Port)
 	}
 
-	seq, ack := seqtrack.GetSeqAck(serverConn)
+	seq, ack, fakeTTL := seqtrack.GetSeqAck(serverConn, uint8(h.mgr.cfg.FakeTTL))
 
 	serverTCP, ok1 := serverConn.LocalAddr().(*net.TCPAddr)
 	remoteTCP, ok2 := serverConn.RemoteAddr().(*net.TCPAddr)
@@ -95,13 +95,13 @@ func (h *handler) injectAndForward(appConn, serverConn net.Conn, dst string) {
 	}
 
 	for i := 0; i < 3; i++ {
-		if err := h.mgr.rawSock.SendFake(connInfo, fake.TLSClientHello, h.mgr.cfg.FakeTTL); err != nil {
+		if err := h.mgr.rawSock.SendFake(connInfo, fake.TLSClientHello, int(fakeTTL)); err != nil {
 			h.mgr.logger.WithError(err).Warn("SendFake failed")
 			break
 		}
 	}
 	h.mgr.logger.WithFields(logrus.Fields{
-		"dst": dst, "seq": seq, "ack": ack, "ttl": h.mgr.cfg.FakeTTL,
+		"dst": dst, "seq": seq, "ack": ack, "ttl": fakeTTL, "ttl_auto_inferred": h.mgr.cfg.FakeTTL != int(fakeTTL),
 	}).Info("fake ClientHellos injected")
 
 	// Let fakes reach DPI before the real ClientHello.
