@@ -107,12 +107,13 @@ func (c *pcapCapture) processPacket(packet gopacket.Packet, cb Callback) {
 	ip := ipLayer.(*layers.IPv4)
 
 	evt := ConnectionEvent{
-		SrcIP:   append(net.IP{}, ip.DstIP.To4()...),
-		DstIP:   append(net.IP{}, ip.SrcIP.To4()...),
-		SrcPort: uint16(tcp.DstPort),
-		DstPort: uint16(tcp.SrcPort),
-		Seq:     tcp.Ack,
-		Ack:     tcp.Seq + 1,
+		SrcIP:     append(net.IP{}, ip.DstIP.To4()...),
+		DstIP:     append(net.IP{}, ip.SrcIP.To4()...),
+		SrcPort:   uint16(tcp.DstPort),
+		DstPort:   uint16(tcp.SrcPort),
+		Seq:       tcp.Ack,
+		Ack:       tcp.Seq + 1,
+		ServerTTL: ip.TTL,
 	}
 
 	cb(evt)

@@ -52,14 +52,15 @@ func SetSeqTracker(st *SeqTracker) {
 	globalSeqTracker = st
 }
 
-func GetSeqAck(conn net.Conn) (seq, ack uint32) {
+func GetSeqAck(conn net.Conn, defaultTTL uint8) (seq, ack uint32, fakeTTL uint8) {
+	// fallback to default TTL in all non-successful cases
 	if globalSeqTracker == nil {
-		return 1, 1
+		return 1, 1, defaultTTL
 	}
 
 	tcpConn, ok := conn.(*net.TCPConn)
 	if !ok {
-		return 1, 1
+		return 1, 1, defaultTTL
 	}
 
 	localPort := uint16(tcpConn.LocalAddr().(*net.TCPAddr).Port)
@@ -67,8 +68,11 @@ func GetSeqAck(conn net.Conn) (seq, ack uint32) {
 	evt := globalSeqTracker.WaitForSeqAck(localPort, 500*time.Millisecond)
 	if evt == nil {
 		logrus.WithField("port", localPort).Warn("seq/ack fallback — Npcap may not be capturing")
-		return 1, 1
+		return 1, 1, defaultTTL
 	}
 
-	return evt.Seq, evt.Ack
+	if evt.ServerTTL == 0 {
+		return 1, 1, defaultTTL
+	}
+	return evt.Seq, evt.Ack, CalculateFakeTTL(evt.ServerTTL)
 }
