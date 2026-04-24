@@ -8,12 +8,13 @@ import (
 
 // ConnInfo holds connection details for crafting fake packets.
 type ConnInfo struct {
-	SrcIP   net.IP
-	DstIP   net.IP
-	SrcPort uint16
-	DstPort uint16
-	Seq     uint32 // TCP sequence number the real data will use
-	Ack     uint32 // TCP ACK number (rcv_nxt from the connection)
+	SrcIP     net.IP
+	DstIP     net.IP
+	SrcPort   uint16
+	DstPort   uint16
+	Seq       uint32 // TCP sequence number the real data will use
+	Ack       uint32 // TCP ACK number (rcv_nxt from the connection)
+	ServerTTL uint8  // TTL value of the SYN-ACK packet received from the server. 0 means unknown.
 }
 
 // RawSocket sends crafted TCP packets with custom TTL.
