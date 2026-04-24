@@ -204,3 +204,36 @@ func TestBuildPacket_DifferentTTL(t *testing.T) {
 		}
 	}
 }
+
+// This verifies that ServerTTL is pure metadata stored on ConnInfo for caller use.
+// It must not influence the constructed packet bytes.
+// The wire TTL comes exclusively from the ttl int parameter.
+func TestBuildPacket_ServerTTLIsMetadata(t *testing.T) {
+	base := ConnInfo{
+		SrcIP:   net.IPv4(10, 0, 0, 1),
+		DstIP:   net.IPv4(1, 1, 1, 1),
+		SrcPort: 5000,
+		DstPort: 443,
+		Seq:     100,
+		Ack:     200,
+	}
+
+	payload := []byte("probe")
+	wireTTL := 8
+
+	pktNoServerTTL := BuildPacket(base, payload, wireTTL)
+
+	withServerTTL := base
+	withServerTTL.ServerTTL = 60
+
+	pktWithServerTTL := BuildPacket(withServerTTL, payload, wireTTL)
+
+	if len(pktNoServerTTL) != len(pktWithServerTTL) {
+		t.Fatalf("packet length differs: %d vs %d", len(pktNoServerTTL), len(pktWithServerTTL))
+	}
+	for i := range pktNoServerTTL {
+		if pktNoServerTTL[i] != pktWithServerTTL[i] {
+			t.Errorf("byte %d differs: 0x%02x vs 0x%02x — ServerTTL leaked into packet", i, pktNoServerTTL[i], pktWithServerTTL[i])
+		}
+	}
+}
