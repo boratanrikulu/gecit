@@ -41,9 +41,6 @@ type Manager struct {
 }
 
 func NewManager(cfg Config, logger *logrus.Logger) *Manager {
-	if cfg.FakeTTL == 0 {
-		cfg.FakeTTL = 8
-	}
 	if len(cfg.Ports) == 0 {
 		cfg.Ports = []uint16{443}
 	}

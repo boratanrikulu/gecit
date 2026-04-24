@@ -19,7 +19,7 @@ var runCmd = &cobra.Command{
 }
 
 func init() {
-	runCmd.Flags().Int("fake-ttl", 8, "TTL for fake packets (reaches DPI, not server)")
+	runCmd.Flags().Int("fake-ttl", 0, "TTL for fake packets sent to DPI (0 = auto-detect from server SYN-ACK)")
 	runCmd.Flags().Bool("doh", true, "enable built-in DoH DNS resolver")
 	runCmd.Flags().String("doh-upstream", "cloudflare", "DoH upstream: preset (cloudflare,google,quad9,nextdns,adguard) or URL")
 	runCmd.Flags().Int("mss", 40, "TCP MSS for ClientHello fragmentation (Linux only)")

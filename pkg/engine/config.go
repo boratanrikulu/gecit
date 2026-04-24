@@ -19,7 +19,7 @@ func DefaultConfig() Config {
 		RestoreAfterBytes: 600,
 		Ports:             []uint16{443},
 		CgroupPath:        "/sys/fs/cgroup",
-		FakeTTL:           8,
+		FakeTTL:           0,
 		DoHEnabled:        true,
 		DoHUpstream:       "cloudflare",
 	}

@@ -13,7 +13,7 @@ func TestDefaultConfig(t *testing.T) {
 		{"MSS", cfg.MSS, 40},
 		{"RestoreMSS", cfg.RestoreMSS, 0},
 		{"RestoreAfterBytes", cfg.RestoreAfterBytes, 600},
-		{"FakeTTL", cfg.FakeTTL, 8},
+		{"FakeTTL", cfg.FakeTTL, 0},
 		{"DoHEnabled", cfg.DoHEnabled, true},
 		{"DoHUpstream", cfg.DoHUpstream, "cloudflare"},
 		{"CgroupPath", cfg.CgroupPath, "/sys/fs/cgroup"},

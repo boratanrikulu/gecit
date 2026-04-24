@@ -65,7 +65,8 @@ func TestGetSeqAck_EventFound_WithServerTTL(t *testing.T) {
 	})
 	globalSeqTracker = st
 
-	seq, ack, fakeTTL := GetSeqAck(conn, 64)
+	// defaultTTL=0 → auto mode: CalculateFakeTTL(serverTTL=60) = 3
+	seq, ack, fakeTTL := GetSeqAck(conn, 0)
 
 	if seq != 9999 {
 		t.Errorf("seq: got %d, want 9999", seq)
@@ -75,6 +76,47 @@ func TestGetSeqAck_EventFound_WithServerTTL(t *testing.T) {
 	}
 	if fakeTTL != 3 {
 		t.Errorf("fakeTTL: got %d, want 3 (CalculateFakeTTL(60))", fakeTTL)
+	}
+}
+
+func TestGetSeqAck_UserOverride_SkipsAutoCalc(t *testing.T) {
+	old := globalSeqTracker
+	defer func() { globalSeqTracker = old }()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	localPort := uint16(conn.LocalAddr().(*net.TCPAddr).Port)
+
+	st := &SeqTracker{}
+	st.conns.Store(localPort, capture.ConnectionEvent{
+		SrcPort:   localPort,
+		Seq:       9999,
+		Ack:       1111,
+		ServerTTL: 60, // CalculateFakeTTL would give 3, but override wins
+	})
+	globalSeqTracker = st
+
+	// non-zero defaultTTL = user override: auto-calculation must be skipped
+	seq, ack, fakeTTL := GetSeqAck(conn, 64)
+
+	if seq != 9999 {
+		t.Errorf("seq: got %d, want 9999", seq)
+	}
+	if ack != 1111 {
+		t.Errorf("ack: got %d, want 1111", ack)
+	}
+	if fakeTTL != 64 {
+		t.Errorf("fakeTTL: got %d, want 64 (user override)", fakeTTL)
 	}
 }
 
