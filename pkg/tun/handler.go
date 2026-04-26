@@ -11,8 +11,8 @@ import (
 
 	gecitdns "github.com/boratanrikulu/gecit/pkg/dns"
 	"github.com/boratanrikulu/gecit/pkg/fake"
-	"github.com/boratanrikulu/gecit/pkg/seqtrack"
 	"github.com/boratanrikulu/gecit/pkg/rawsock"
+	"github.com/boratanrikulu/gecit/pkg/seqtrack"
 	singtun "github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/buf"
 	M "github.com/sagernet/sing/common/metadata"
@@ -44,7 +44,7 @@ func (h *handler) NewConnectionEx(
 	if conn == nil || !destination.IsValid() {
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	dstPort := destination.Port
 	addr := net.JoinHostPort(destination.AddrString(), fmt.Sprint(dstPort))
@@ -55,7 +55,7 @@ func (h *handler) NewConnectionEx(
 		h.mgr.logger.WithError(err).WithField("dst", dst).Debug("dial failed")
 		return
 	}
-	defer serverConn.Close()
+	defer func() { _ = serverConn.Close() }()
 
 	if !h.mgr.targetPorts[dstPort] {
 		pipe(conn, serverConn)
@@ -66,18 +66,26 @@ func (h *handler) NewConnectionEx(
 }
 
 func (h *handler) injectAndForward(appConn, serverConn net.Conn, dst string) {
-	appConn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if err := appConn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		h.mgr.logger.WithError(err).Debug("set client read deadline failed")
+		return
+	}
 	clientHello := make([]byte, 16384)
 	n, err := appConn.Read(clientHello)
 	if err != nil {
 		return
 	}
 	clientHello = clientHello[:n]
-	appConn.SetReadDeadline(time.Time{})
+	if err := appConn.SetReadDeadline(time.Time{}); err != nil {
+		h.mgr.logger.WithError(err).Debug("clear client read deadline failed")
+		return
+	}
 
 	// Extract real destination from SNI — more reliable than DNS cache.
 	if sni := fake.ParseSNI(clientHello); sni != "" {
-		dst = fmt.Sprintf("%s:%d", sni, serverConn.RemoteAddr().(*net.TCPAddr).Port)
+		if remoteTCP, ok := serverConn.RemoteAddr().(*net.TCPAddr); ok {
+			dst = fmt.Sprintf("%s:%d", sni, remoteTCP.Port)
+		}
 	}
 
 	seq, ack := seqtrack.GetSeqAck(serverConn)
@@ -87,11 +95,32 @@ func (h *handler) injectAndForward(appConn, serverConn net.Conn, dst string) {
 	if !ok1 || !ok2 {
 		return
 	}
+	srcPort, err := tcpPort(serverTCP.Port)
+	if err != nil {
+		h.mgr.logger.WithError(err).Debug("invalid local TCP port")
+		return
+	}
+	dstPort, err := tcpPort(remoteTCP.Port)
+	if err != nil {
+		h.mgr.logger.WithError(err).Debug("invalid remote TCP port")
+		return
+	}
 
 	connInfo := rawsock.ConnInfo{
 		SrcIP: serverTCP.IP, DstIP: remoteTCP.IP,
-		SrcPort: uint16(serverTCP.Port), DstPort: uint16(remoteTCP.Port),
+		SrcPort: srcPort, DstPort: dstPort,
 		Seq: seq, Ack: ack,
+	}
+
+	if connInfo.SrcIP.To4() == nil || connInfo.DstIP.To4() == nil {
+		h.mgr.logger.WithField("dst", dst).Warn("skipping non-IPv4 fake injection")
+		forwardClientHello(appConn, serverConn, clientHello)
+		return
+	}
+	if !h.mgr.cfg.AllowPrivateTargets && rawsock.IsUnsafeTarget(connInfo.DstIP) {
+		h.mgr.logger.WithField("dst", dst).Warn("skipping fake injection to private/local target")
+		forwardClientHello(appConn, serverConn, clientHello)
+		return
 	}
 
 	for i := 0; i < 3; i++ {
@@ -114,6 +143,13 @@ func (h *handler) injectAndForward(appConn, serverConn net.Conn, dst string) {
 	pipe(appConn, serverConn)
 }
 
+func forwardClientHello(appConn, serverConn net.Conn, clientHello []byte) {
+	if _, err := serverConn.Write(clientHello); err != nil {
+		return
+	}
+	pipe(appConn, serverConn)
+}
+
 func (h *handler) NewPacketConnectionEx(
 	ctx context.Context,
 	conn N.PacketConn,
@@ -127,46 +163,91 @@ func (h *handler) NewPacketConnectionEx(
 	if conn == nil || !destination.IsValid() {
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
-	addr := net.JoinHostPort(destination.AddrString(), fmt.Sprint(destination.Port))
-	realConn, err := h.mgr.dialServer("udp", addr, 5*time.Second)
-	if err != nil {
-		return
+	type udpFlow struct {
+		conn net.Conn
+		dst  M.Socksaddr
 	}
-	defer realConn.Close()
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		rawBuf := make([]byte, 65535)
-		for {
-			realConn.SetReadDeadline(time.Now().Add(30 * time.Second))
-			n, err := realConn.Read(rawBuf)
-			if err != nil {
-				return
-			}
-			if err := conn.WritePacket(buf.As(rawBuf[:n]), destination); err != nil {
-				return
-			}
+	var (
+		mu    sync.Mutex
+		flows = make(map[string]udpFlow)
+	)
+	defer func() {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, f := range flows {
+			_ = f.conn.Close()
 		}
 	}()
 
+	getFlow := func(dst M.Socksaddr) (udpFlow, error) {
+		key := dst.String()
+		mu.Lock()
+		if f, ok := flows[key]; ok {
+			mu.Unlock()
+			return f, nil
+		}
+		mu.Unlock()
+
+		addr := net.JoinHostPort(dst.AddrString(), fmt.Sprint(dst.Port))
+		realConn, err := h.mgr.dialServer("udp", addr, 5*time.Second)
+		if err != nil {
+			return udpFlow{}, err
+		}
+		f := udpFlow{conn: realConn, dst: dst}
+
+		mu.Lock()
+		if existing, ok := flows[key]; ok {
+			mu.Unlock()
+			_ = realConn.Close()
+			return existing, nil
+		}
+		flows[key] = f
+		mu.Unlock()
+
+		go func() {
+			rawBuf := make([]byte, 65535)
+			for {
+				if err := realConn.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
+					return
+				}
+				n, err := realConn.Read(rawBuf)
+				if err != nil {
+					return
+				}
+				if err := conn.WritePacket(buf.As(rawBuf[:n]), dst); err != nil {
+					return
+				}
+			}
+		}()
+		return f, nil
+	}
+
 	for {
 		b := buf.NewSize(65535)
-		conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-		_, err := conn.ReadPacket(b)
+		if err := conn.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
+			b.Release()
+			break
+		}
+		packetDst, err := conn.ReadPacket(b)
 		if err != nil {
 			b.Release()
 			break
 		}
-		_, err = realConn.Write(b.Bytes())
+		if !packetDst.IsValid() {
+			packetDst = destination
+		}
+		flow, err := getFlow(packetDst)
+		if err == nil {
+			_, err = flow.conn.Write(b.Bytes())
+		}
 		b.Release()
 		if err != nil {
 			break
 		}
 	}
-	<-done
 }
 
 func resolveDst(addr, ip string, port uint16) string {
@@ -176,6 +257,13 @@ func resolveDst(addr, ip string, port uint16) string {
 		}
 	}
 	return addr
+}
+
+func tcpPort(port int) (uint16, error) {
+	if port <= 0 || port > 65535 {
+		return 0, fmt.Errorf("port out of range: %d", port)
+	}
+	return uint16(port), nil // #nosec G115 -- range checked above.
 }
 
 const idleTimeout = 5 * time.Minute
@@ -189,7 +277,9 @@ func pipe(a, b net.Conn) {
 		// Prevents goroutine/fd accumulation from idle connections.
 		buf := make([]byte, 32*1024)
 		for {
-			src.SetReadDeadline(time.Now().Add(idleTimeout))
+			if err := src.SetReadDeadline(time.Now().Add(idleTimeout)); err != nil {
+				break
+			}
 			n, err := src.Read(buf)
 			if n > 0 {
 				if _, wErr := dst.Write(buf[:n]); wErr != nil {
@@ -200,8 +290,8 @@ func pipe(a, b net.Conn) {
 				break
 			}
 		}
-		a.SetDeadline(time.Now())
-		b.SetDeadline(time.Now())
+		_ = a.SetDeadline(time.Now())
+		_ = b.SetDeadline(time.Now())
 	}
 	go cp(b, a)
 	go cp(a, b)

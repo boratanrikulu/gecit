@@ -1,6 +1,7 @@
 package dns
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 
@@ -89,10 +90,7 @@ func TestPopDomain_Concurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			n := 0
-			for {
-				if s.PopDomain("10.0.0.1") == "" {
-					break
-				}
+			for s.PopDomain("10.0.0.1") != "" {
 				n++
 			}
 			count <- n
@@ -107,6 +105,37 @@ func TestPopDomain_Concurrent(t *testing.T) {
 	}
 	if total != 1000 {
 		t.Fatalf("total pops: got %d, want 1000", total)
+	}
+}
+
+func TestPushDomainBoundsPerIPQueue(t *testing.T) {
+	s := newTestServer()
+	for i := 0; i < maxDomainsPerIP+10; i++ {
+		s.pushDomain("10.0.0.1", fmt.Sprintf("domain-%d.com", i))
+	}
+	if got := len(s.ipQueue["10.0.0.1"]); got != maxDomainsPerIP {
+		t.Fatalf("queue length got %d, want %d", got, maxDomainsPerIP)
+	}
+}
+
+func TestPushDomainBoundsTrackedIPs(t *testing.T) {
+	s := newTestServer()
+	for i := 0; i < maxTrackedIPs+10; i++ {
+		s.pushDomain(string(rune(i+1)), "domain.com")
+	}
+	if got := len(s.ipQueue); got != maxTrackedIPs {
+		t.Fatalf("tracked IPs got %d, want %d", got, maxTrackedIPs)
+	}
+}
+
+func TestPushDomainDeduplicatesConsecutiveDomains(t *testing.T) {
+	s := newTestServer()
+	s.pushDomain("10.0.0.1", "domain.com")
+	s.pushDomain("10.0.0.1", "domain.com")
+	s.pushDomain("10.0.0.1", "other.com")
+
+	if got := s.ipQueue["10.0.0.1"]; len(got) != 2 || got[0] != "domain.com" || got[1] != "other.com" {
+		t.Fatalf("queue got %v, want [domain.com other.com]", got)
 	}
 }
 

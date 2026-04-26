@@ -18,9 +18,9 @@ func TestManagerStartStop(t *testing.T) {
 	logger.SetOutput(&bytes.Buffer{})
 
 	mgr := NewManager(Config{
-		Ports:    []uint16{443},
-		FakeTTL:  8,
-		MSS:      40,
+		Ports:   []uint16{443},
+		FakeTTL: 8,
+		MSS:     88,
 	}, logger)
 
 	ctx := context.Background()
@@ -42,7 +42,7 @@ func TestManagerPerfEvent(t *testing.T) {
 	mgr := NewManager(Config{
 		Ports:   []uint16{443},
 		FakeTTL: 8,
-		MSS:     40,
+		MSS:     88,
 	}, logger)
 
 	ctx := context.Background()
@@ -74,7 +74,7 @@ func TestManagerMultipleConnections(t *testing.T) {
 	mgr := NewManager(Config{
 		Ports:   []uint16{443},
 		FakeTTL: 8,
-		MSS:     40,
+		MSS:     88,
 	}, logger)
 
 	ctx := context.Background()

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"runtime"
@@ -23,13 +24,14 @@ import (
 
 // Config holds the userspace configuration pushed to BPF maps.
 type Config struct {
-	MSS               int
-	RestoreMSS        int
-	RestoreAfterBytes int
-	Ports             []uint16
-	ExcludeIPs        []net.IP
-	CgroupPath        string
-	FakeTTL           int
+	MSS                 int
+	RestoreMSS          int
+	RestoreAfterBytes   int
+	Ports               []uint16
+	ExcludeIPs          []net.IP
+	CgroupPath          string
+	FakeTTL             int
+	AllowPrivateTargets bool
 }
 
 // connEvent must match struct conn_event in maps.h exactly.
@@ -42,6 +44,8 @@ type connEvent struct {
 	Ack     uint32
 }
 
+const connEventSize = 20
+
 // Manager loads, attaches, and manages the BPF sock_ops program.
 type Manager struct {
 	collection *ebpf.Collection
@@ -52,11 +56,19 @@ type Manager struct {
 	logger     *logrus.Logger
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
+	mssWarned  bool
+}
+
+type bpfStats struct {
+	MSSSetFailures      uint64
+	MSSRestoreFailures  uint64
+	LastMSSSetError     int32
+	LastMSSRestoreError int32
 }
 
 func NewManager(cfg Config, logger *logrus.Logger) *Manager {
 	if cfg.MSS == 0 {
-		cfg.MSS = 40
+		cfg.MSS = 88
 	}
 	if cfg.RestoreAfterBytes == 0 {
 		cfg.RestoreAfterBytes = 600
@@ -118,34 +130,28 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.link = l
 
 	if err := m.pushConfig(); err != nil {
-		m.Stop()
-		return fmt.Errorf("push config: %w", err)
+		return m.stopAfterStartError(fmt.Errorf("push config: %w", err))
 	}
 	if err := m.pushTargetPorts(); err != nil {
-		m.Stop()
-		return fmt.Errorf("push target ports: %w", err)
+		return m.stopAfterStartError(fmt.Errorf("push target ports: %w", err))
 	}
 	if err := m.pushExcludeIPs(); err != nil {
-		m.Stop()
-		return fmt.Errorf("push exclude IPs: %w", err)
+		return m.stopAfterStartError(fmt.Errorf("push exclude IPs: %w", err))
 	}
 
 	eventsMap := coll.Maps["conn_events"]
 	if eventsMap == nil {
-		m.Stop()
-		return errMapNotFound("conn_events")
+		return m.stopAfterStartError(errMapNotFound("conn_events"))
 	}
-	rd, err := perf.NewReader(eventsMap, 4096)
+	rd, err := perf.NewReader(eventsMap, 64<<10)
 	if err != nil {
-		m.Stop()
-		return fmt.Errorf("open perf reader: %w", err)
+		return m.stopAfterStartError(fmt.Errorf("open perf reader: %w", err))
 	}
 	m.reader = rd
 
 	rs, err := rawsock.New("")
 	if err != nil {
-		m.Stop()
-		return fmt.Errorf("raw socket: %w", err)
+		return m.stopAfterStartError(fmt.Errorf("raw socket: %w", err))
 	}
 	m.rawSock = rs
 
@@ -177,7 +183,13 @@ func (m *Manager) readEvents(ctx context.Context) {
 			return
 		}
 
-		if len(record.RawSample) < 20 {
+		if record.LostSamples > 0 {
+			m.logger.WithField("lost", record.LostSamples).Warn("BPF perf events dropped; fake injection may be incomplete")
+			continue
+		}
+
+		if len(record.RawSample) != connEventSize {
+			m.logger.WithField("size", len(record.RawSample)).Warn("unexpected BPF conn event size")
 			continue
 		}
 
@@ -203,6 +215,17 @@ func (m *Manager) injectFake(evt connEvent) {
 		Ack:     evt.Ack,
 	}
 
+	if conn.SrcIP.To4() == nil || conn.DstIP.To4() == nil || conn.DstIP.Equal(net.IPv4zero) {
+		m.logger.WithField("dst", conn.DstIP.String()).Warn("skipping non-IPv4 fake injection")
+		return
+	}
+	if !m.cfg.AllowPrivateTargets && rawsock.IsUnsafeTarget(conn.DstIP) {
+		m.logger.WithField("dst", conn.DstIP.String()).Warn("skipping fake injection to private/local target")
+		return
+	}
+
+	m.warnMSSFailures()
+
 	if err := m.rawSock.SendFake(conn, fake.TLSClientHello, m.cfg.FakeTTL); err != nil {
 		m.logger.WithError(err).Warn("failed to send fake packet")
 		return
@@ -224,6 +247,31 @@ func (m *Manager) injectFake(evt connEvent) {
 	}).Info("fake ClientHello injected")
 }
 
+func (m *Manager) warnMSSFailures() {
+	if m.mssWarned || m.collection == nil {
+		return
+	}
+	statsMap := m.collection.Maps["gecit_stats"]
+	if statsMap == nil {
+		return
+	}
+	var stats bpfStats
+	key := uint32(0)
+	if err := statsMap.Lookup(key, &stats); err != nil {
+		return
+	}
+	if stats.MSSSetFailures == 0 && stats.MSSRestoreFailures == 0 {
+		return
+	}
+	m.mssWarned = true
+	m.logger.WithFields(logrus.Fields{
+		"mss_set_failures":       stats.MSSSetFailures,
+		"mss_restore_failures":   stats.MSSRestoreFailures,
+		"last_mss_set_error":     stats.LastMSSSetError,
+		"last_mss_restore_error": stats.LastMSSRestoreError,
+	}).Warn("BPF TCP_MAXSEG update failed; MSS fragmentation may be inactive")
+}
+
 // Stop detaches the BPF program and releases all resources.
 func (m *Manager) Stop() error {
 	m.logger.Info("stopping gecit")
@@ -231,17 +279,19 @@ func (m *Manager) Stop() error {
 	if m.cancel != nil {
 		m.cancel()
 	}
+	var err error
 	if m.reader != nil {
-		m.reader.Close()
+		err = errors.Join(err, m.reader.Close())
+		m.reader = nil
 	}
 	m.wg.Wait()
 
 	if m.rawSock != nil {
-		m.rawSock.Close()
+		err = errors.Join(err, m.rawSock.Close())
 		m.rawSock = nil
 	}
 	if m.link != nil {
-		m.link.Close()
+		err = errors.Join(err, m.link.Close())
 		m.link = nil
 	}
 	if m.collection != nil {
@@ -250,7 +300,14 @@ func (m *Manager) Stop() error {
 	}
 
 	m.logger.Info("gecit stopped")
-	return nil
+	return err
+}
+
+func (m *Manager) stopAfterStartError(startErr error) error {
+	if stopErr := m.Stop(); stopErr != nil {
+		return errors.Join(startErr, stopErr)
+	}
+	return startErr
 }
 
 func uint32ToIP(n uint32) net.IP {

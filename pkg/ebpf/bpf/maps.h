@@ -64,3 +64,17 @@ struct {
 	__type(key, __u64);
 	__type(value, struct conn_state);
 } connections SEC(".maps");
+
+struct gecit_stats_t {
+	__u64 mss_set_failures;
+	__u64 mss_restore_failures;
+	__s32 last_mss_set_error;
+	__s32 last_mss_restore_error;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, struct gecit_stats_t);
+} gecit_stats SEC(".maps");

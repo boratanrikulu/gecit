@@ -16,7 +16,7 @@ func New(_ string) (RawSocket, error) {
 	}
 
 	if err := syscall.SetsockoptInt(fd, syscall.IPPROTO_IP, syscall.IP_HDRINCL, 1); err != nil {
-		syscall.Close(fd)
+		_ = syscall.Close(fd)
 		return nil, fmt.Errorf("IP_HDRINCL: %w", err)
 	}
 
@@ -24,7 +24,13 @@ func New(_ string) (RawSocket, error) {
 }
 
 func (s *platformRawSocket) SendFake(conn ConnInfo, payload []byte, ttl int) error {
-	pkt := BuildPacket(conn, payload, ttl)
+	if err := ValidatePacketInput(conn, ttl); err != nil {
+		return err
+	}
+	pkt, err := BuildPacket(conn, payload, ttl)
+	if err != nil {
+		return err
+	}
 
 	addr := syscall.SockaddrInet4{Port: 0}
 	copy(addr.Addr[:], conn.DstIP.To4())

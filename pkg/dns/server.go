@@ -18,6 +18,12 @@ type Server struct {
 	ipQueue  map[string][]string
 }
 
+const (
+	maxTrackedIPs      = 1024
+	maxDomainsPerIP    = 16
+	maxTrackedIPLogKey = "tracked_ips"
+)
+
 var globalDNS *Server
 
 func GetDNSServer() *Server { return globalDNS }
@@ -39,14 +45,41 @@ func (s *Server) PopDomain(ip string) string {
 }
 
 func NewServer(upstream string, logger *logrus.Logger, dial DialFunc) *Server {
+	return NewServerWithOptions(upstream, logger, dial, false)
+}
+
+func NewServerWithOptions(upstream string, logger *logrus.Logger, dial DialFunc, allowPlainHTTP bool) *Server {
 	s := &Server{
-		resolver: NewResolver(upstream, dial),
+		resolver: NewResolverWithOptions(upstream, dial, allowPlainHTTP),
 		upstream: upstream,
 		logger:   logger,
 		ipQueue:  make(map[string][]string),
 	}
 	globalDNS = s
 	return s
+}
+
+func (s *Server) pushDomain(ip, domain string) {
+	if ip == "" || domain == "" {
+		return
+	}
+	if _, ok := s.ipQueue[ip]; !ok && len(s.ipQueue) >= maxTrackedIPs {
+		if s.logger != nil {
+			s.logger.WithFields(logrus.Fields{
+				maxTrackedIPLogKey: len(s.ipQueue),
+				"max":              maxTrackedIPs,
+			}).Debug("DNS attribution cache full; dropping domain mapping")
+		}
+		return
+	}
+	q := s.ipQueue[ip]
+	if len(q) > 0 && q[len(q)-1] == domain {
+		return
+	}
+	if len(q) >= maxDomainsPerIP {
+		q = q[len(q)-maxDomainsPerIP+1:]
+	}
+	s.ipQueue[ip] = append(q, domain)
 }
 
 func (s *Server) Start() error {
@@ -138,7 +171,7 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 			}).Debug("DNS resolved")
 			s.mu.Lock()
 			for _, ip := range ips {
-				s.ipQueue[ip] = append(s.ipQueue[ip], domain)
+				s.pushDomain(ip, domain)
 			}
 			s.mu.Unlock()
 		}
@@ -148,5 +181,7 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 func (s *Server) sendError(w dns.ResponseWriter, r *dns.Msg, rcode int) {
 	resp := new(dns.Msg)
 	resp.SetRcode(r, rcode)
-	w.WriteMsg(resp)
+	if err := w.WriteMsg(resp); err != nil && s.logger != nil {
+		s.logger.WithError(err).Debug("failed to write DNS error response")
+	}
 }

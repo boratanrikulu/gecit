@@ -2,43 +2,39 @@ package app
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
+
+	gecitdns "github.com/boratanrikulu/gecit/pkg/dns"
 )
 
 func platformCleanup() bool {
 	cleaned := false
 
-	if data, err := os.ReadFile("/tmp/gecit-dns-backup"); err == nil {
-		lines := strings.SplitN(string(data), "\n", 3)
-		svc := "Wi-Fi"
-		if len(lines) >= 2 && strings.TrimSpace(lines[1]) != "" {
-			svc = strings.TrimSpace(lines[1])
-		}
-
-		prev := strings.TrimSpace(lines[0])
-		fmt.Printf("restoring DNS for %s...\n", svc)
-		if prev == "" || prev == "empty" || strings.Contains(prev, "aren't any") {
-			exec.Command("networksetup", "-setdnsservers", svc, "empty").CombinedOutput()
+	if gecitdns.HasSystemDNSBackup() {
+		fmt.Println("restoring DNS...")
+		if err := gecitdns.RestoreSystemDNS(); err != nil {
+			fmt.Printf("failed to restore DNS: %v\n", err)
 		} else {
-			args := append([]string{"-setdnsservers", svc}, strings.Fields(prev)...)
-			exec.Command("networksetup", args...).CombinedOutput()
-		}
-		os.Remove("/tmp/gecit-dns-backup")
-		cleaned = true
-	}
-
-	if out, err := exec.Command("networksetup", "-getdnsservers", "Wi-Fi").CombinedOutput(); err == nil {
-		if strings.TrimSpace(string(out)) == "127.0.0.1" {
-			fmt.Println("resetting DNS to DHCP...")
-			exec.Command("networksetup", "-setdnsservers", "Wi-Fi", "empty").CombinedOutput()
 			cleaned = true
 		}
 	}
 
+	if out, err := exec.Command("/usr/sbin/networksetup", "-getdnsservers", "Wi-Fi").CombinedOutput(); err == nil {
+		if strings.TrimSpace(string(out)) == "127.0.0.1" {
+			fmt.Println("resetting DNS to DHCP...")
+			if out, err := exec.Command("/usr/sbin/networksetup", "-setdnsservers", "Wi-Fi", "empty").CombinedOutput(); err != nil {
+				fmt.Printf("failed to reset DNS: %s: %v\n", strings.TrimSpace(string(out)), err)
+			} else {
+				cleaned = true
+			}
+		}
+	}
+
 	if cleaned {
-		exec.Command("killall", "-HUP", "mDNSResponder").CombinedOutput()
+		if out, err := exec.Command("/usr/bin/killall", "-HUP", "mDNSResponder").CombinedOutput(); err != nil {
+			fmt.Printf("failed to refresh DNS cache: %s: %v\n", strings.TrimSpace(string(out)), err)
+		}
 	}
 
 	return cleaned

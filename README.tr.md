@@ -43,6 +43,7 @@ Bazı ISP'ler DNS yanıtlarını da zehirler. gecit, dahili DoH sunucusu ile DNS
 ### Windows notları
 
 - **Npcap**: [npcap.com](https://npcap.com/#download) adresinden indirip kurun. seq/ack çıkarma ve sahte paket enjeksiyonu için gereklidir.
+- **Gateway MAC keşfi**: gateway MAC adresi çözülemezse sahte paket enjeksiyonu artık başlamaz. Bu durum ağa yeni bağlandıktan hemen sonra olursa gateway'e bir kez erişip (ör. `ping`) tekrar deneyin.
 - **Windows Defender**: gecit'i `Win32/Wacapew.A!ml` olarak işaretleyebilir (yanlış pozitif). gecit TUN arayüzü oluşturur, DNS'i değiştirir ve raw socket kullanır - Defender bu davranışları şüpheli bulur. İstisna ekleyin: Windows Güvenlik → Virüs ve tehdit koruması → Dışlamalar → gecit.exe ekleyin.
 - **Yönetici olarak çalıştırın**: PowerShell'e sağ tıklayıp "Yönetici olarak çalıştır" seçin, ardından `.\gecit.exe run` çalıştırın.
 
@@ -80,7 +81,7 @@ gecit.exe run
 
 ### Kaynaktan derleme
 
-Go 1.24+ gereklidir. Linux için kernel 5.10+, clang ve llvm-strip gerekir. Windows için [Npcap SDK](https://npcap.com/guide/npcap-devguide.html) gerekir.
+Go 1.24+ gereklidir. Linux için kernel 5.10+, clang ve llvm-strip gerekir. Windows için [Npcap SDK](https://npcap.com/guide/npcap-devguide.html) ve CGO gerekir.
 
 ```bash
 git clone https://github.com/boratanrikulu/gecit.git
@@ -133,9 +134,11 @@ sudo gecit cleanup
 | Parametre | Varsayılan | Açıklama |
 |-----------|-----------|----------|
 | `--doh-upstream` | `cloudflare` | DoH upstream: hazır isim veya URL. Virgülle ayrılarak yedekleme sırası. |
+| `--allow-plain-doh` | `false` | Düz HTTP DoH upstream kullanımına izin verir. Varsayılan olarak kapalıdır. |
 | `--fake-ttl` | `8` | Sahte paket TTL değeri |
-| `--mss` | `40` | TCP MSS (Linux) |
+| `--mss` | `88` | TCP MSS (Linux) |
 | `--ports` | `443` | Hedef portlar |
+| `--allow-private-targets` | `false` | Private, loopback ve link-local hedeflere fake injection izni verir. Güvenlik için varsayılan kapalıdır. |
 | `--interface` | otomatik | Ağ arayüzü |
 | `-v` | kapalı | Ayrıntılı loglama |
 
