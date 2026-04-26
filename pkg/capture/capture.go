@@ -1,6 +1,9 @@
 package capture
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/boratanrikulu/gecit/pkg/rawsock"
 )
 
@@ -19,4 +22,15 @@ type Detector interface {
 	Start(cb Callback) error
 	// Stop stops capturing.
 	Stop() error
+}
+
+func synAckFilter(ports []uint16) string {
+	if len(ports) == 0 {
+		ports = []uint16{443}
+	}
+	portExprs := make([]string, 0, len(ports))
+	for _, port := range ports {
+		portExprs = append(portExprs, fmt.Sprintf("tcp src port %d", port))
+	}
+	return fmt.Sprintf("(%s) and tcp[tcpflags] & (tcp-syn|tcp-ack) = (tcp-syn|tcp-ack)", strings.Join(portExprs, " or "))
 }

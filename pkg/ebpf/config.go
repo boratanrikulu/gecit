@@ -3,6 +3,9 @@
 package ebpf
 
 import (
+	"fmt"
+	"math"
+
 	"github.com/cilium/ebpf"
 )
 
@@ -22,11 +25,9 @@ func (m *Manager) pushConfig() error {
 		return errMapNotFound("gecit_config")
 	}
 
-	cfg := gecitConfig{
-		MSS:               uint16(m.cfg.MSS),
-		RestoreMSS:        uint16(m.cfg.RestoreMSS),
-		RestoreAfterBytes: uint32(m.cfg.RestoreAfterBytes),
-		Enabled:           1,
+	cfg, err := m.bpfConfig(1)
+	if err != nil {
+		return err
 	}
 
 	key := uint32(0)
@@ -81,13 +82,29 @@ func (m *Manager) UpdateEnabled(enabled bool) error {
 		e = 1
 	}
 
-	cfg := gecitConfig{
-		MSS:               uint16(m.cfg.MSS),
-		RestoreMSS:        uint16(m.cfg.RestoreMSS),
-		RestoreAfterBytes: uint32(m.cfg.RestoreAfterBytes),
-		Enabled:           e,
+	cfg, err := m.bpfConfig(e)
+	if err != nil {
+		return err
 	}
 
 	key := uint32(0)
 	return configMap.Update(key, cfg, ebpf.UpdateAny)
+}
+
+func (m *Manager) bpfConfig(enabled uint8) (gecitConfig, error) {
+	if m.cfg.MSS < 1 || m.cfg.MSS > math.MaxUint16 {
+		return gecitConfig{}, fmt.Errorf("MSS out of range for BPF config: %d", m.cfg.MSS)
+	}
+	if m.cfg.RestoreMSS < 0 || m.cfg.RestoreMSS > math.MaxUint16 {
+		return gecitConfig{}, fmt.Errorf("restore MSS out of range for BPF config: %d", m.cfg.RestoreMSS)
+	}
+	if m.cfg.RestoreAfterBytes < 0 || m.cfg.RestoreAfterBytes > math.MaxUint32 {
+		return gecitConfig{}, fmt.Errorf("restore-after-bytes out of range for BPF config: %d", m.cfg.RestoreAfterBytes)
+	}
+	return gecitConfig{
+		MSS:               uint16(m.cfg.MSS),               // #nosec G115 -- range checked above.
+		RestoreMSS:        uint16(m.cfg.RestoreMSS),        // #nosec G115 -- range checked above.
+		RestoreAfterBytes: uint32(m.cfg.RestoreAfterBytes), // #nosec G115 -- range checked above.
+		Enabled:           enabled,
+	}, nil
 }

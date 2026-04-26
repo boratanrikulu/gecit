@@ -10,7 +10,7 @@ func TestDefaultConfig(t *testing.T) {
 		got  interface{}
 		want interface{}
 	}{
-		{"MSS", cfg.MSS, 40},
+		{"MSS", cfg.MSS, 88},
 		{"RestoreMSS", cfg.RestoreMSS, 0},
 		{"RestoreAfterBytes", cfg.RestoreAfterBytes, 600},
 		{"FakeTTL", cfg.FakeTTL, 8},

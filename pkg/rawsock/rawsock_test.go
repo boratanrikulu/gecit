@@ -6,6 +6,15 @@ import (
 	"testing"
 )
 
+func mustBuildPacket(t *testing.T, conn ConnInfo, payload []byte, ttl int) []byte {
+	t.Helper()
+	pkt, err := BuildPacket(conn, payload, ttl)
+	if err != nil {
+		t.Fatalf("BuildPacket returned error: %v", err)
+	}
+	return pkt
+}
+
 func TestChecksum_KnownVector(t *testing.T) {
 	// RFC 1071 example: 0x0001 + 0xf203 + ... = 0xddf2
 	data := []byte{0x00, 0x01, 0xf2, 0x03, 0xf4, 0xf5, 0xf6, 0xf7}
@@ -34,11 +43,7 @@ func TestChecksum_OddLength(t *testing.T) {
 	if got == 0 {
 		t.Fatal("checksum should not be zero")
 	}
-	// Pad to even and verify complement property.
-	padded := append(data, 0x00)
-	padded = append(padded, byte(got>>8), byte(got))
-	// Recompute over padded+checksum — should give complement of padding effect.
-	// Instead, just verify consistency: same input → same output.
+	// Verify consistency: same input -> same output.
 	if got2 := Checksum(data); got != got2 {
 		t.Fatalf("checksum not deterministic: 0x%04x vs 0x%04x", got, got2)
 	}
@@ -56,7 +61,7 @@ func TestBuildPacket_IPHeader(t *testing.T) {
 	payload := []byte("test-payload")
 	ttl := 8
 
-	pkt := BuildPacket(conn, payload, ttl)
+	pkt := mustBuildPacket(t, conn, payload, ttl)
 
 	// IP header is first 20 bytes.
 	if len(pkt) < 40+len(payload) {
@@ -100,7 +105,7 @@ func TestBuildPacket_TCPHeader(t *testing.T) {
 	}
 	payload := []byte("hello")
 
-	pkt := BuildPacket(conn, payload, 8)
+	pkt := mustBuildPacket(t, conn, payload, 8)
 	tcp := pkt[20:] // TCP header starts after 20-byte IP header.
 
 	// Src port.
@@ -149,7 +154,7 @@ func TestBuildPacket_Payload(t *testing.T) {
 	}
 	payload := []byte("the-real-payload")
 
-	pkt := BuildPacket(conn, payload, 8)
+	pkt := mustBuildPacket(t, conn, payload, 8)
 
 	// Payload starts after IP (20) + TCP (20) headers.
 	got := pkt[40:]
@@ -169,7 +174,7 @@ func TestBuildPacket_TCPChecksum(t *testing.T) {
 	}
 	payload := []byte("test")
 
-	pkt := BuildPacket(conn, payload, 8)
+	pkt := mustBuildPacket(t, conn, payload, 8)
 
 	// Verify TCP checksum by recomputing over pseudo-header + TCP segment.
 	tcpSeg := pkt[20:]
@@ -198,9 +203,75 @@ func TestBuildPacket_DifferentTTL(t *testing.T) {
 	}
 
 	for _, ttl := range []int{1, 8, 64, 128, 255} {
-		pkt := BuildPacket(conn, []byte("x"), ttl)
+		pkt := mustBuildPacket(t, conn, []byte("x"), ttl)
 		if pkt[8] != byte(ttl) {
 			t.Errorf("TTL %d: got %d", ttl, pkt[8])
+		}
+	}
+}
+
+func TestBuildPacket_RejectsOversizedPayload(t *testing.T) {
+	conn := ConnInfo{
+		SrcIP:   net.IPv4(10, 0, 0, 1),
+		DstIP:   net.IPv4(1, 1, 1, 1),
+		SrcPort: 5000,
+		DstPort: 443,
+		Seq:     100,
+		Ack:     200,
+	}
+	payload := make([]byte, maxFakePayloadLen+1)
+	if _, err := BuildPacket(conn, payload, 8); err == nil {
+		t.Fatal("oversized payload succeeded, want error")
+	}
+}
+
+func TestValidatePacketInput(t *testing.T) {
+	conn := ConnInfo{
+		SrcIP:   net.IPv4(10, 0, 0, 1),
+		DstIP:   net.IPv4(1, 1, 1, 1),
+		SrcPort: 5000,
+		DstPort: 443,
+		Seq:     100,
+		Ack:     200,
+	}
+	if err := ValidatePacketInput(conn, 8); err != nil {
+		t.Fatalf("valid input returned error: %v", err)
+	}
+	for _, ttl := range []int{-1, 0, 256} {
+		if err := ValidatePacketInput(conn, ttl); err == nil {
+			t.Fatalf("ttl %d succeeded, want error", ttl)
+		}
+	}
+	conn.DstIP = net.ParseIP("2001:db8::1")
+	if err := ValidatePacketInput(conn, 8); err == nil {
+		t.Fatal("IPv6 destination succeeded, want error")
+	}
+}
+
+func TestIsUnsafeTarget(t *testing.T) {
+	unsafeIPs := []string{
+		"0.0.0.0",
+		"255.255.255.255",
+		"127.0.0.1",
+		"10.0.0.1",
+		"169.254.1.1",
+		"224.0.0.1",
+		"100.64.0.1",
+		"100.127.255.255",
+		"::",
+		"::1",
+		"ff02::1",
+	}
+	for _, ip := range unsafeIPs {
+		if !IsUnsafeTarget(net.ParseIP(ip)) {
+			t.Fatalf("IsUnsafeTarget(%s) = false, want true", ip)
+		}
+	}
+
+	safeIPs := []string{"1.1.1.1", "8.8.8.8", "93.184.216.34", "2001:4860:4860::8888"}
+	for _, ip := range safeIPs {
+		if IsUnsafeTarget(net.ParseIP(ip)) {
+			t.Fatalf("IsUnsafeTarget(%s) = true, want false", ip)
 		}
 	}
 }

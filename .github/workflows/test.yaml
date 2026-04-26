@@ -6,27 +6,74 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   unit:
     name: Unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.26'
 
       - name: Run unit tests
         run: go test -race -timeout 60s ./...
 
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  platform-build:
+    name: Platform build (${{ matrix.os }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            runner: ubuntu-latest
+            tags: ""
+            cgo: 0
+          - os: darwin
+            runner: macos-latest
+            tags: with_gvisor
+            cgo: 1
+          - os: windows
+            runner: windows-latest
+            tags: with_gvisor
+            cgo: 0
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26'
+
+      - name: Install libpcap (macOS)
+        if: matrix.os == 'darwin'
+        run: brew install libpcap || true
+
+      - name: Build package graph
+        shell: bash
+        env:
+          CGO_ENABLED: ${{ matrix.cgo }}
+        run: |
+          TAGS=""
+          if [ -n "${{ matrix.tags }}" ]; then TAGS="-tags ${{ matrix.tags }}"; fi
+          go test $TAGS ./...
+
   integration:
     name: Integration tests (eBPF)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.26'
 

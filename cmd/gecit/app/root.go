@@ -2,6 +2,7 @@ package app
 
 import (
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
@@ -19,10 +20,16 @@ func init() {
 	rootCmd.PersistentFlags().IntSlice("ports", []int{443}, "target destination ports")
 	rootCmd.PersistentFlags().String("interface", "", "network interface, macOS/Windows only (auto-detect if empty)")
 
-	viper.BindPFlag("ports", rootCmd.PersistentFlags().Lookup("ports"))
-	viper.BindPFlag("interface", rootCmd.PersistentFlags().Lookup("interface"))
+	mustBindPFlag("ports", rootCmd.PersistentFlags().Lookup("ports"))
+	mustBindPFlag("interface", rootCmd.PersistentFlags().Lookup("interface"))
 }
 
 func Execute() error {
 	return rootCmd.Execute()
+}
+
+func mustBindPFlag(key string, flag *pflag.Flag) {
+	if err := viper.BindPFlag(key, flag); err != nil {
+		panic(err)
+	}
 }

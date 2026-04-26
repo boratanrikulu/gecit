@@ -25,8 +25,55 @@
 #ifndef TCP_MAXSEG
 #define TCP_MAXSEG 2
 #endif
+#ifndef AF_INET
+#define AF_INET 2
+#endif
 
 #include "maps.h"
+
+static __always_inline int is_target_flow(struct bpf_sock_ops *skops)
+{
+	if (skops->family != AF_INET)
+		return 0;
+
+	__u32 dst_ip = skops->remote_ip4;
+	if (bpf_map_lookup_elem(&exclude_ips, &dst_ip))
+		return 0;
+
+	__u16 dst_port = (__u16)bpf_ntohl(skops->remote_port);
+	if (!bpf_map_lookup_elem(&target_ports, &dst_port))
+		return 0;
+
+	return 1;
+}
+
+static __always_inline void record_mss_error(int err, int restore)
+{
+	if (err >= 0)
+		return;
+
+	__u32 key = 0;
+	struct gecit_stats_t *stats = bpf_map_lookup_elem(&gecit_stats, &key);
+	if (!stats)
+		return;
+
+	if (restore) {
+		__sync_fetch_and_add(&stats->mss_restore_failures, 1);
+		stats->last_mss_restore_error = err;
+	} else {
+		__sync_fetch_and_add(&stats->mss_set_failures, 1);
+		stats->last_mss_set_error = err;
+	}
+}
+
+static __always_inline int set_small_mss(struct bpf_sock_ops *skops,
+                                         struct gecit_config_t *cfg)
+{
+	int mss = cfg->mss;
+	int ret = bpf_setsockopt(skops, IPPROTO_TCP, TCP_MAXSEG, &mss, sizeof(mss));
+	record_mss_error(ret, 0);
+	return ret;
+}
 
 // handle_established is called when an outgoing TCP connection completes the
 // handshake. If the destination port is in the target_ports map, notify
@@ -34,24 +81,18 @@
 static __always_inline int handle_established(struct bpf_sock_ops *skops,
                                               struct gecit_config_t *cfg)
 {
-	__u32 dst_ip = skops->remote_ip4;
-	if (bpf_map_lookup_elem(&exclude_ips, &dst_ip))
-		return 1;
-
-	__u16 dst_port = (__u16)bpf_ntohl(skops->remote_port);
-	if (!bpf_map_lookup_elem(&target_ports, &dst_port))
+	if (!is_target_flow(skops))
 		return 1;
 
 	// Set small MSS — kernel will fragment outgoing data into tiny segments.
-	int mss = cfg->mss;
-	bpf_setsockopt(skops, IPPROTO_TCP, TCP_MAXSEG, &mss, sizeof(mss));
+	set_small_mss(skops, cfg);
 
 	// Notify userspace via perf event for fake ClientHello injection.
 	struct conn_event evt = {};
 	evt.src_ip   = skops->local_ip4;
 	evt.dst_ip   = skops->remote_ip4;
 	evt.src_port = skops->local_port;
-	evt.dst_port = dst_port;
+	evt.dst_port = (__u16)bpf_ntohl(skops->remote_port);
 	evt.seq      = skops->snd_nxt;
 	evt.ack      = skops->rcv_nxt;
 	bpf_perf_event_output(skops, &conn_events, BPF_F_CURRENT_CPU,
@@ -67,6 +108,16 @@ static __always_inline int handle_established(struct bpf_sock_ops *skops,
 		skops->bpf_sock_ops_cb_flags |
 		BPF_SOCK_OPS_WRITE_HDR_OPT_CB_FLAG);
 
+	return 1;
+}
+
+static __always_inline int handle_connect(struct bpf_sock_ops *skops,
+                                          struct gecit_config_t *cfg)
+{
+	if (!is_target_flow(skops))
+		return 1;
+
+	set_small_mss(skops, cfg);
 	return 1;
 }
 
@@ -90,8 +141,9 @@ static __always_inline int handle_write_hdr_opt(struct bpf_sock_ops *skops,
 
 	if (state->bytes_sent > cfg->restore_after_bytes) {
 		int normal_mss = cfg->restore_mss ? cfg->restore_mss : 1460;
-		bpf_setsockopt(skops, IPPROTO_TCP, TCP_MAXSEG,
-			       &normal_mss, sizeof(normal_mss));
+		int ret = bpf_setsockopt(skops, IPPROTO_TCP, TCP_MAXSEG,
+					 &normal_mss, sizeof(normal_mss));
+		record_mss_error(ret, 1);
 
 		state->mss_restored = 1;
 
@@ -114,6 +166,8 @@ int gecit_sockops(struct bpf_sock_ops *skops)
 		return 1;
 
 	switch (skops->op) {
+	case BPF_SOCK_OPS_TCP_CONNECT_CB:
+		return handle_connect(skops, cfg);
 	case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:
 		return handle_established(skops, cfg);
 	case BPF_SOCK_OPS_HDR_OPT_LEN_CB:

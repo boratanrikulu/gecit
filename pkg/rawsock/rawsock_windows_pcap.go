@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/google/gopacket/pcap"
+	"golang.org/x/sys/windows"
 )
 
 type pcapRawSocket struct {
@@ -29,13 +31,26 @@ func New(iface string) (RawSocket, error) {
 		return nil, fmt.Errorf("pcap open %s: %w (is Npcap installed?)", iface, err)
 	}
 
-	srcMAC, dstMAC := discoverMACs()
+	srcMAC, dstMAC, err := discoverMACs(iface)
+	if err != nil {
+		handle.Close()
+		return nil, err
+	}
 
 	return &pcapRawSocket{handle: handle, srcMAC: srcMAC, dstMAC: dstMAC}, nil
 }
 
 func (s *pcapRawSocket) SendFake(conn ConnInfo, payload []byte, ttl int) error {
-	ipTcp := BuildPacket(conn, payload, ttl)
+	if err := ValidatePacketInput(conn, ttl); err != nil {
+		return err
+	}
+	ipTcp, err := BuildPacket(conn, payload, ttl)
+	if err != nil {
+		return err
+	}
+	if isZeroMAC(s.srcMAC) || isZeroMAC(s.dstMAC) || isBroadcastMAC(s.dstMAC) {
+		return fmt.Errorf("refusing to send fake packet without resolved unicast MACs")
+	}
 
 	frame := make([]byte, 14+len(ipTcp))
 	copy(frame[0:6], s.dstMAC)
@@ -53,38 +68,68 @@ func (s *pcapRawSocket) Close() error {
 }
 
 // discoverMACs finds the local NIC MAC and gateway MAC from the ARP table.
-func discoverMACs() (srcMAC, dstMAC net.HardwareAddr) {
-	// Default fallback: broadcast dst, zero src.
-	srcMAC = net.HardwareAddr{0, 0, 0, 0, 0, 0}
-	dstMAC = net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+func windowsSystem32Exe(name string) string {
+	if dir, err := windows.GetSystemDirectory(); err == nil && dir != "" {
+		return filepath.Join(dir, name)
+	}
+	return filepath.Join(`C:\Windows`, "System32", name)
+}
 
-	// Find local NIC MAC.
-	ifaces, _ := net.Interfaces()
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 || len(iface.HardwareAddr) == 0 {
-			continue
-		}
-		addrs, _ := iface.Addrs()
-		for _, a := range addrs {
-			if ipNet, ok := a.(*net.IPNet); ok {
-				if ipv4 := ipNet.IP.To4(); ipv4 != nil && !ipv4.IsLoopback() && !ipv4.Equal(net.IPv4(10, 0, 85, 1)) {
-					srcMAC = iface.HardwareAddr
-					// Find gateway MAC from ARP table.
-					if gwMAC := gatewayMAC(ipv4); gwMAC != nil {
-						dstMAC = gwMAC
+func discoverMACs(ifaceName string) (srcMAC, dstMAC net.HardwareAddr, err error) {
+	iface, err := net.InterfaceByName(ifaceName)
+	if err != nil || iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 || len(iface.HardwareAddr) == 0 {
+		return nil, nil, fmt.Errorf("interface %s has no usable hardware address", ifaceName)
+	}
+	srcMAC = iface.HardwareAddr
+
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return nil, nil, fmt.Errorf("interface addresses for %s: %w", ifaceName, err)
+	}
+	for _, a := range addrs {
+		if ipNet, ok := a.(*net.IPNet); ok {
+			if ipv4 := ipNet.IP.To4(); ipv4 != nil && !ipv4.IsLoopback() && !ipv4.Equal(net.IPv4(10, 0, 85, 1)) {
+				if gwMAC := gatewayMAC(ipv4); gwMAC != nil {
+					if isZeroMAC(gwMAC) || isBroadcastMAC(gwMAC) {
+						return nil, nil, fmt.Errorf("gateway MAC for %s is not unicast", ipv4)
 					}
-					return
+					return srcMAC, gwMAC, nil
 				}
+				return nil, nil, fmt.Errorf("gateway MAC not found for interface %s", ifaceName)
 			}
 		}
 	}
-	return
+	return nil, nil, fmt.Errorf("no usable IPv4 address on interface %s", ifaceName)
+}
+
+func isZeroMAC(mac net.HardwareAddr) bool {
+	if len(mac) == 0 {
+		return true
+	}
+	for _, b := range mac {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func isBroadcastMAC(mac net.HardwareAddr) bool {
+	if len(mac) == 0 {
+		return false
+	}
+	for _, b := range mac {
+		if b != 0xff {
+			return false
+		}
+	}
+	return true
 }
 
 // gatewayMAC finds the default gateway's MAC address from the ARP table.
 func gatewayMAC(localIP net.IP) net.HardwareAddr {
 	// Find default gateway IP.
-	out, err := exec.Command("cmd", "/c", "route", "print", "0.0.0.0").CombinedOutput()
+	out, err := exec.Command(windowsSystem32Exe("route.exe"), "print", "0.0.0.0").CombinedOutput()
 	if err != nil {
 		return nil
 	}
@@ -92,9 +137,12 @@ func gatewayMAC(localIP net.IP) net.HardwareAddr {
 	var gwIP string
 	for _, line := range strings.Split(string(out), "\n") {
 		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) >= 3 && fields[0] == "0.0.0.0" && fields[1] == "0.0.0.0" {
+		if len(fields) >= 4 && fields[0] == "0.0.0.0" && fields[1] == "0.0.0.0" && fields[3] == localIP.String() {
 			gwIP = fields[2]
 			break
+		}
+		if gwIP == "" && len(fields) >= 3 && fields[0] == "0.0.0.0" && fields[1] == "0.0.0.0" {
+			gwIP = fields[2]
 		}
 	}
 	if gwIP == "" {
@@ -102,7 +150,7 @@ func gatewayMAC(localIP net.IP) net.HardwareAddr {
 	}
 
 	// Look up gateway MAC in ARP table.
-	out, err = exec.Command("arp", "-a").CombinedOutput()
+	out, err = exec.Command(windowsSystem32Exe("arp.exe"), "-a").CombinedOutput()
 	if err != nil {
 		return nil
 	}
@@ -188,7 +236,7 @@ func defaultInterface() (string, error) {
 }
 
 func defaultGatewayIP() net.IP {
-	out, err := exec.Command("cmd", "/c", "route", "print", "0.0.0.0").CombinedOutput()
+	out, err := exec.Command(windowsSystem32Exe("route.exe"), "print", "0.0.0.0").CombinedOutput()
 	if err != nil {
 		return nil
 	}
