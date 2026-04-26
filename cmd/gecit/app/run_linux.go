@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/url"
 	"strings"
@@ -27,15 +28,16 @@ func newPlatformEngine(cfg engine.Config, logger *logrus.Logger) (engine.Engine,
 
 	return &ebpfEngine{
 		mgr: bpf.NewManager(bpf.Config{
-			MSS:               cfg.MSS,
-			RestoreMSS:        cfg.RestoreMSS,
-			RestoreAfterBytes: cfg.RestoreAfterBytes,
-			Ports:             cfg.Ports,
-			ExcludeIPs:        dohUpstreamIPs(upstream),
-			CgroupPath:        cfg.CgroupPath,
-			FakeTTL:           cfg.FakeTTL,
+			MSS:                 cfg.MSS,
+			RestoreMSS:          cfg.RestoreMSS,
+			RestoreAfterBytes:   cfg.RestoreAfterBytes,
+			Ports:               cfg.Ports,
+			ExcludeIPs:          dohUpstreamIPs(upstream),
+			CgroupPath:          cfg.CgroupPath,
+			FakeTTL:             cfg.FakeTTL,
+			AllowPrivateTargets: cfg.AllowPrivateTargets,
 		}, logger),
-		dns:        gecitdns.NewServer(upstream, logger, nil),
+		dns:        gecitdns.NewServerWithOptions(upstream, logger, nil, cfg.AllowPlainDoH),
 		dohEnabled: cfg.DoHEnabled,
 		logger:     logger,
 	}, nil
@@ -82,7 +84,9 @@ func (e *ebpfEngine) Start(ctx context.Context) error {
 			return err
 		}
 		if err := gecitdns.SetSystemDNS(); err != nil {
-			e.dns.Stop()
+			if stopErr := e.dns.Stop(); stopErr != nil {
+				e.logger.WithError(stopErr).Warn("failed to stop DNS server")
+			}
 			return err
 		}
 		e.logger.Info("encrypted DNS active")
@@ -90,8 +94,12 @@ func (e *ebpfEngine) Start(ctx context.Context) error {
 
 	if err := e.mgr.Start(ctx); err != nil {
 		if e.dohEnabled {
-			gecitdns.RestoreSystemDNS()
-			e.dns.Stop()
+			if restoreErr := gecitdns.RestoreSystemDNS(); restoreErr != nil {
+				e.logger.WithError(restoreErr).Warn("failed to restore system DNS")
+			}
+			if stopErr := e.dns.Stop(); stopErr != nil {
+				e.logger.WithError(stopErr).Warn("failed to stop DNS server")
+			}
 		}
 		return err
 	}
@@ -100,16 +108,21 @@ func (e *ebpfEngine) Start(ctx context.Context) error {
 }
 
 func (e *ebpfEngine) Stop() error {
+	var err error
 	if e.dohEnabled {
-		if err := gecitdns.RestoreSystemDNS(); err != nil {
-			e.logger.WithError(err).Warn("failed to restore system DNS")
+		if restoreErr := gecitdns.RestoreSystemDNS(); restoreErr != nil {
+			err = errors.Join(err, restoreErr)
+			e.logger.WithError(restoreErr).Warn("failed to restore system DNS")
 		}
-		if err := e.dns.Stop(); err != nil {
-			e.logger.WithError(err).Warn("failed to stop DNS server")
+		if stopErr := e.dns.Stop(); stopErr != nil {
+			err = errors.Join(err, stopErr)
+			e.logger.WithError(stopErr).Warn("failed to stop DNS server")
 		}
-		e.logger.Info("system DNS restored")
+		if err == nil {
+			e.logger.Info("system DNS restored")
+		}
 	}
-	return e.mgr.Stop()
+	return errors.Join(err, e.mgr.Stop())
 }
 
 func (e *ebpfEngine) Mode() string { return "ebpf-sockops" }

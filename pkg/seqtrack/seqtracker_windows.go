@@ -21,9 +21,12 @@ func NewSeqTracker(iface string, ports []uint16) (*SeqTracker, error) {
 	}
 
 	st := &SeqTracker{detector: det}
-	det.Start(func(evt capture.ConnectionEvent) {
+	if err := det.Start(func(evt capture.ConnectionEvent) {
 		st.conns.Store(evt.SrcPort, evt)
-	})
+	}); err != nil {
+		_ = det.Stop()
+		return nil, err
+	}
 
 	return st, nil
 }
@@ -42,7 +45,7 @@ func (st *SeqTracker) WaitForSeqAck(localPort uint16, timeout time.Duration) *ca
 
 func (st *SeqTracker) Stop() {
 	if st.detector != nil {
-		st.detector.Stop()
+		_ = st.detector.Stop()
 	}
 }
 
@@ -62,7 +65,11 @@ func GetSeqAck(conn net.Conn) (seq, ack uint32) {
 		return 1, 1
 	}
 
-	localPort := uint16(tcpConn.LocalAddr().(*net.TCPAddr).Port)
+	localAddr, ok := tcpConn.LocalAddr().(*net.TCPAddr)
+	if !ok || localAddr.Port <= 0 || localAddr.Port > 65535 {
+		return 1, 1
+	}
+	localPort := uint16(localAddr.Port) // #nosec G115 -- range checked above.
 
 	evt := globalSeqTracker.WaitForSeqAck(localPort, 500*time.Millisecond)
 	if evt == nil {

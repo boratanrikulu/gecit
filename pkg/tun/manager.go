@@ -4,13 +4,14 @@ package tun
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
 	"time"
 
-	"github.com/boratanrikulu/gecit/pkg/seqtrack"
 	"github.com/boratanrikulu/gecit/pkg/rawsock"
+	"github.com/boratanrikulu/gecit/pkg/seqtrack"
 	"github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/control"
 	singlog "github.com/sagernet/sing/common/logger"
@@ -20,9 +21,10 @@ import (
 const tunMTU = 1420
 
 type Config struct {
-	Ports     []uint16
-	FakeTTL   int
-	Interface string
+	Ports               []uint16
+	FakeTTL             int
+	Interface           string
+	AllowPrivateTargets bool
 }
 
 type Manager struct {
@@ -38,6 +40,7 @@ type Manager struct {
 	bindControl    control.Func
 	networkMonitor tun.NetworkUpdateMonitor
 	ifaceMonitor   tun.DefaultInterfaceMonitor
+	seqTracker     *seqtrack.SeqTracker
 }
 
 func NewManager(cfg Config, logger *logrus.Logger) *Manager {
@@ -58,8 +61,17 @@ func NewManager(cfg Config, logger *logrus.Logger) *Manager {
 	}
 }
 
-func (m *Manager) Start(ctx context.Context) error {
+func (m *Manager) Start(ctx context.Context) (err error) {
 	m.ctx, m.cancel = context.WithCancel(ctx)
+	started := false
+	defer func() {
+		if err == nil || started {
+			return
+		}
+		if stopErr := m.Stop(); stopErr != nil && m.logger != nil {
+			m.logger.WithError(stopErr).Debug("cleanup after TUN start failure failed")
+		}
+	}()
 
 	physIface := m.cfg.Interface
 	if physIface == "" {
@@ -77,14 +89,12 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 
 	if err := m.initNetworking(physIface); err != nil {
-		m.rawSock.Close()
 		return err
 	}
 
 	tunOpts := m.tunOptions()
 	tunDevice, err := tun.New(tunOpts)
 	if err != nil {
-		m.rawSock.Close()
 		return fmt.Errorf("create TUN: %w", err)
 	}
 	m.tunDevice = tunDevice
@@ -103,22 +113,15 @@ func (m *Manager) Start(ctx context.Context) error {
 		InterfaceFinder:        m.ifaceFinder,
 	})
 	if err != nil {
-		tunDevice.Close()
-		m.rawSock.Close()
 		return fmt.Errorf("create stack: %w", err)
 	}
 	m.stack = stack
 
 	if err := tunDevice.Start(); err != nil {
-		stack.Close()
-		tunDevice.Close()
-		m.rawSock.Close()
 		return fmt.Errorf("start TUN: %w", err)
 	}
 
 	if err := stack.Start(); err != nil {
-		tunDevice.Close()
-		m.rawSock.Close()
 		return fmt.Errorf("start stack: %w", err)
 	}
 
@@ -128,6 +131,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		"ttl":   m.cfg.FakeTTL,
 	}).Info("TUN engine active")
 
+	started = true
 	return nil
 }
 
@@ -136,26 +140,37 @@ func (m *Manager) Stop() error {
 
 	if m.cancel != nil {
 		m.cancel()
+		m.cancel = nil
 	}
+	var err error
 	if m.stack != nil {
-		m.stack.Close()
+		err = errors.Join(err, m.closeAndReturn("stack", m.stack.Close))
+		m.stack = nil
 	}
 	if m.tunDevice != nil {
-		m.tunDevice.Close()
+		err = errors.Join(err, m.closeAndReturn("TUN device", m.tunDevice.Close))
+		m.tunDevice = nil
 	}
 	if m.rawSock != nil {
-		m.rawSock.Close()
+		err = errors.Join(err, m.closeAndReturn("raw socket", m.rawSock.Close))
+		m.rawSock = nil
 	}
 	if m.ifaceMonitor != nil {
-		m.ifaceMonitor.Close()
+		err = errors.Join(err, m.closeAndReturn("interface monitor", m.ifaceMonitor.Close))
+		m.ifaceMonitor = nil
 	}
 	if m.networkMonitor != nil {
-		m.networkMonitor.Close()
+		err = errors.Join(err, m.closeAndReturn("network monitor", m.networkMonitor.Close))
+		m.networkMonitor = nil
+	}
+	if m.seqTracker != nil {
+		m.seqTracker.Stop()
+		m.seqTracker = nil
 	}
 	seqtrack.SetSeqTracker(nil)
 
 	m.logger.Info("TUN engine stopped")
-	return nil
+	return err
 }
 
 func (m *Manager) dialServer(network, addr string, timeout time.Duration) (net.Conn, error) {
@@ -186,6 +201,7 @@ func (m *Manager) startSeqTracker(iface string) error {
 	if err != nil {
 		return err
 	}
+	m.seqTracker = st
 	seqtrack.SetSeqTracker(st)
 	m.logger.WithField("interface", iface).Info("seq/ack tracker active")
 	return nil
@@ -212,8 +228,17 @@ func (m *Manager) initNetworking(physIface string) error {
 		return fmt.Errorf("start network monitor: %w", err)
 	}
 	if err := m.ifaceMonitor.Start(); err != nil {
-		m.networkMonitor.Close()
 		return fmt.Errorf("start interface monitor: %w", err)
+	}
+	return nil
+}
+
+func (m *Manager) closeAndReturn(name string, closeFn func() error) error {
+	if err := closeFn(); err != nil {
+		if m.logger != nil {
+			m.logger.WithError(err).WithField("resource", name).Debug("close failed")
+		}
+		return fmt.Errorf("close %s: %w", name, err)
 	}
 	return nil
 }
@@ -226,7 +251,7 @@ func (m *Manager) tunOptions() tun.Options {
 		AutoRoute:        true,
 		InterfaceMonitor: m.ifaceMonitor,
 		InterfaceFinder:  m.ifaceFinder,
-		DNSServers: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
+		DNSServers:       []netip.Addr{netip.MustParseAddr("127.0.0.1")},
 	}
 }
 
@@ -260,4 +285,3 @@ func detectPhysicalInterface() string {
 	}
 	return ""
 }
-

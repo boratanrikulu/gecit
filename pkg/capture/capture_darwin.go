@@ -3,7 +3,6 @@ package capture
 import (
 	"fmt"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/google/gopacket"
@@ -15,7 +14,6 @@ type pcapCapture struct {
 	handle *pcap.Handle
 	ports  map[uint16]bool
 	seen   map[uint16]bool // dedup by src port (one fake per connection)
-	mu     sync.Mutex
 	done   chan struct{}
 }
 
@@ -27,7 +25,7 @@ func NewCapture(iface string, ports []uint16) (Detector, error) {
 
 	// Only capture SYN-ACK packets (tcp flags SYN+ACK = 0x12).
 	// This drastically reduces pcap load — ignores all data packets.
-	filter := "tcp src port 443 and tcp[tcpflags] & (tcp-syn|tcp-ack) = (tcp-syn|tcp-ack)"
+	filter := synAckFilter(ports)
 	if err := handle.SetBPFFilter(filter); err != nil {
 		handle.Close()
 		return nil, fmt.Errorf("set BPF filter: %w", err)

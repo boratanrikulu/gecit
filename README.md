@@ -45,6 +45,7 @@ Additionally, some ISPs poison DNS responses. gecit includes a built-in DoH (DNS
 ### Windows notes
 
 - **Npcap**: Download and install from [npcap.com](https://npcap.com/#download). Required for seq/ack extraction and fake packet injection.
+- **Gateway MAC discovery**: fake packet injection now refuses to run if the gateway MAC cannot be resolved. If this happens right after joining a network, reach the gateway once (for example with `ping`) and retry.
 - **Windows Defender**: May flag gecit as `Win32/Wacapew.A!ml` (false positive). gecit creates a TUN interface, modifies DNS, and uses raw sockets - Defender flags this behavior. Add an exception: Windows Security → Virus & threat protection → Exclusions → Add gecit.exe.
 - **Run as Administrator**: Right-click PowerShell → "Run as Administrator", then run `.\gecit.exe run`.
 
@@ -82,7 +83,7 @@ gecit.exe run
 
 ### Building from source
 
-Requires Go 1.24+. Linux builds need kernel 5.10+, clang, and llvm-strip for BPF compilation. Windows builds need [Npcap SDK](https://npcap.com/guide/npcap-devguide.html).
+Requires Go 1.24+. Linux builds need kernel 5.10+, clang, and llvm-strip for BPF compilation. Windows builds need [Npcap SDK](https://npcap.com/guide/npcap-devguide.html) and CGO enabled.
 
 ```bash
 git clone https://github.com/boratanrikulu/gecit.git
@@ -137,9 +138,11 @@ sudo gecit cleanup
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--doh-upstream` | `cloudflare` | DoH upstream: preset name or URL. Comma-separated for fallback. |
+| `--allow-plain-doh` | `false` | Allow plaintext HTTP DoH upstreams. Disabled by default. |
 | `--fake-ttl` | `8` | TTL for fake packets (must reach DPI but expire before server) |
-| `--mss` | `40` | TCP MSS for ClientHello fragmentation (Linux) |
+| `--mss` | `88` | TCP MSS for ClientHello fragmentation (Linux) |
 | `--ports` | `443` | Target destination ports |
+| `--allow-private-targets` | `false` | Allow fake injection to private, loopback, and link-local targets. Disabled by default as a safety guardrail. |
 | `--interface` | auto | Network interface |
 | `-v` | off | Verbose/debug logging |
 

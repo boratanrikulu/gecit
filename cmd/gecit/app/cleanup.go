@@ -18,6 +18,9 @@ func init() {
 }
 
 func runCleanup(cmd *cobra.Command, args []string) error {
+	if err := checkPrivileges(); err != nil {
+		return err
+	}
 	cleaned := platformCleanup()
 	if cleaned {
 		fmt.Println("cleanup complete — system settings restored")
