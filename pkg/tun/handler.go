@@ -11,8 +11,8 @@ import (
 
 	gecitdns "github.com/boratanrikulu/gecit/pkg/dns"
 	"github.com/boratanrikulu/gecit/pkg/fake"
-	"github.com/boratanrikulu/gecit/pkg/seqtrack"
 	"github.com/boratanrikulu/gecit/pkg/rawsock"
+	"github.com/boratanrikulu/gecit/pkg/seqtrack"
 	singtun "github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/buf"
 	M "github.com/sagernet/sing/common/metadata"
@@ -94,15 +94,16 @@ func (h *handler) injectAndForward(appConn, serverConn net.Conn, dst string) {
 		Seq: seq, Ack: ack,
 	}
 
+	fakePayload := fake.RandomTLSClientHello()
 	for i := 0; i < 3; i++ {
-		if err := h.mgr.rawSock.SendFake(connInfo, fake.TLSClientHello, h.mgr.cfg.FakeTTL); err != nil {
+		if err := h.mgr.rawSock.SendFake(connInfo, fakePayload, h.mgr.cfg.FakeTTL); err != nil {
 			h.mgr.logger.WithError(err).Warn("SendFake failed")
 			break
 		}
 	}
 	h.mgr.logger.WithFields(logrus.Fields{
 		"dst": dst, "seq": seq, "ack": ack, "ttl": h.mgr.cfg.FakeTTL,
-	}).Info("fake ClientHellos injected")
+	}).Debug("fake ClientHellos injected")
 
 	// Let fakes reach DPI before the real ClientHello.
 	time.Sleep(2 * time.Millisecond)

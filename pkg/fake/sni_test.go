@@ -3,7 +3,7 @@ package fake
 import "testing"
 
 func TestParseSNI_FromOurClientHello(t *testing.T) {
-	sni := ParseSNI(TLSClientHello)
+	sni := ParseSNI(TLSClientHello())
 	if sni != "www.google.com" {
 		t.Fatalf("got %q, want %q", sni, "www.google.com")
 	}
