@@ -14,7 +14,7 @@ type Config struct {
 
 func DefaultConfig() Config {
 	return Config{
-		MSS:               40,
+		MSS:               88,
 		RestoreMSS:        0,
 		RestoreAfterBytes: 600,
 		Ports:             []uint16{443},

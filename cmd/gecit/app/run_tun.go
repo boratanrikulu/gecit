@@ -51,7 +51,11 @@ func (e *tunEngine) Start(ctx context.Context) error {
 			resumeSystemDNS()
 			return err
 		}
-		e.logger.Info("encrypted DNS active")
+		if svc := dnsServiceInfo(); svc != "" {
+			e.logger.WithField("service", svc).Info("encrypted DNS active")
+		} else {
+			e.logger.Info("encrypted DNS active")
+		}
 	}
 
 	if err := e.mgr.Start(ctx); err != nil {
