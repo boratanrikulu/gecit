@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  BPFVET_VERSION: "v0.2.1"
+  BPFVET_SHA256: "79387d694285b762361c6385670544de3f04a329cdd3cd6b2cf41e339f979b56"
+
 jobs:
   unit:
     name: Unit tests
@@ -19,6 +23,25 @@ jobs:
 
       - name: Run unit tests
         run: go test -race -timeout 60s ./...
+
+  bpfvet:
+    name: BPF compatibility check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run bpfvet
+        run: |
+          curl -fsSL "https://github.com/boratanrikulu/bpfvet/releases/download/${BPFVET_VERSION}/bpfvet-linux-amd64" \
+            -o /usr/local/bin/bpfvet
+          echo "${BPFVET_SHA256}  /usr/local/bin/bpfvet" | sha256sum -c -
+          chmod +x /usr/local/bin/bpfvet
+
+          echo '## BPF Kernel Compatibility Report' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          bpfvet pkg/ebpf/bpf/bin/x86/sockops.bpf.o pkg/ebpf/bpf/bin/arm64/sockops.bpf.o \
+            | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
   integration:
     name: Integration tests (eBPF)
