@@ -24,7 +24,7 @@ jobs:
       - name: Install BPF toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm llvm-dev
+          sudo apt-get install -y clang llvm llvm-dev libbpf-dev
 
       - name: Build BPF objects via gobee
         run: make bpf-all
@@ -45,7 +45,7 @@ jobs:
       - name: Install BPF toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm llvm-dev
+          sudo apt-get install -y clang llvm llvm-dev libbpf-dev
 
       - name: Build BPF objects via gobee
         run: make bpf-all
@@ -76,7 +76,7 @@ jobs:
       - name: Install BPF toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm llvm-dev
+          sudo apt-get install -y clang llvm llvm-dev libbpf-dev
 
       - name: Build BPF objects via gobee
         run: make bpf-all

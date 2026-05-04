@@ -22,7 +22,7 @@ jobs:
       - name: Install BPF toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm llvm-dev
+          sudo apt-get install -y clang llvm llvm-dev libbpf-dev
 
       - name: Compile BPF (x86 + arm64)
         run: make bpf-all

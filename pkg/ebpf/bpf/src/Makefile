@@ -5,7 +5,6 @@ CFLAGS := -Wall -Werror -O2 -g
 
 OUTPUT_DIR_X86 := ../bin/x86
 OUTPUT_DIR_ARM := ../bin/arm64
-INCLUDE_DIR := ../../../../include
 
 CLANG ?= clang
 LLVM_STRIP ?= llvm-strip
@@ -13,11 +12,12 @@ BPF_TARGET := bpfel
 
 # On Debian/Ubuntu, asm/types.h lives under the multiarch include path
 # instead of /usr/include/asm. Add it to the include search path so
-# `#include <linux/bpf.h>` resolves regardless of host arch.
+# `#include <linux/bpf.h>` resolves regardless of host arch. The libbpf
+# headers (bpf/bpf_helpers.h, bpf/bpf_endian.h) come from libbpf-dev.
 HOST_ARCH := $(shell uname -m)
 MULTIARCH_INCLUDE := /usr/include/$(HOST_ARCH)-linux-gnu
 
-BPF_CFLAGS := $(CFLAGS) -target $(BPF_TARGET) -I$(INCLUDE_DIR) -I$(MULTIARCH_INCLUDE)
+BPF_CFLAGS := $(CFLAGS) -target $(BPF_TARGET) -I$(MULTIARCH_INCLUDE)
 
 ENTRYPOINT_SRC := sockops.bpf.c
 
