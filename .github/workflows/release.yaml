@@ -15,13 +15,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
       - name: Install BPF toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y clang llvm llvm-dev
 
       - name: Compile BPF (x86 + arm64)
-        run: make -f pkg/ebpf/bpf/Makefile bpf-all
+        run: make bpf-all
 
       - name: Upload BPF objects
         uses: actions/upload-artifact@v4

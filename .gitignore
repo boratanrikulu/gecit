@@ -1,6 +1,10 @@
 bin/
 *.o
 !pkg/ebpf/bpf/bin/**/*.bpf.o
+# gobee-generated artifacts (regenerated on every build)
+pkg/ebpf/bpf/src/sockops.bpf.c
+pkg/ebpf/bpf/src/sockops.bpf.c.map
+pkg/ebpf/bpf/sockops_bindings.go
 .claude/
 .DS_Store
 *.swp

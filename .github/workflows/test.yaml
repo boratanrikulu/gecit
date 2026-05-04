@@ -30,6 +30,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Install BPF toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm llvm-dev
+
+      - name: Build BPF objects via gobee
+        run: make bpf-all
+
       - name: Run bpfvet
         run: |
           curl -fsSL "https://github.com/boratanrikulu/bpfvet/releases/download/${BPFVET_VERSION}/bpfvet-linux-amd64" \
@@ -52,6 +64,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+
+      - name: Install BPF toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm llvm-dev
+
+      - name: Build BPF objects via gobee
+        run: make bpf-all
 
       - name: Run eBPF integration tests
         run: sudo go test -tags integration -timeout 120s -v ./pkg/ebpf/

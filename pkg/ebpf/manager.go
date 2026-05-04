@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	gecitdns "github.com/boratanrikulu/gecit/pkg/dns"
+	gecitbpf "github.com/boratanrikulu/gecit/pkg/ebpf/bpf"
 	"github.com/boratanrikulu/gecit/pkg/fake"
 	"github.com/boratanrikulu/gecit/pkg/rawsock"
 	"github.com/cilium/ebpf"
@@ -32,26 +33,16 @@ type Config struct {
 	FakeTTL           int
 }
 
-// connEvent must match struct conn_event in maps.h exactly.
-type connEvent struct {
-	SrcIP   uint32
-	DstIP   uint32
-	SrcPort uint16
-	DstPort uint16
-	Seq     uint32
-	Ack     uint32
-}
-
 // Manager loads, attaches, and manages the BPF sock_ops program.
 type Manager struct {
-	collection *ebpf.Collection
-	link       link.Link
-	reader     *perf.Reader
-	rawSock    rawsock.RawSocket
-	cfg        Config
-	logger     *logrus.Logger
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
+	objs    *gecitbpf.SockopsObjects
+	link    link.Link
+	reader  *perf.Reader
+	rawSock rawsock.RawSocket
+	cfg     Config
+	logger  *logrus.Logger
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 }
 
 func NewManager(cfg Config, logger *logrus.Logger) *Manager {
@@ -85,34 +76,30 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	m.logger.Info("loading BPF sock_ops program")
 
-	spec, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(SockopsProgram))
+	spec, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(gecitbpf.Program))
 	if err != nil {
 		return fmt.Errorf("load BPF spec: %w", err)
 	}
 
-	coll, err := ebpf.NewCollection(spec)
+	objs, err := gecitbpf.LoadSockops(spec)
 	if err != nil {
-		return fmt.Errorf("create BPF collection: %w", err)
+		return fmt.Errorf("load sockops objects: %w", err)
 	}
-	m.collection = coll
+	m.objs = objs
 
 	btf.FlushKernelSpec()
 	runtime.GC()
-
-	prog := coll.Programs["gecit_sockops"]
-	if prog == nil {
-		return fmt.Errorf("BPF program 'gecit_sockops' not found in collection")
-	}
 
 	m.logger.WithField("cgroup", m.cfg.CgroupPath).Info("attaching sock_ops to cgroup")
 
 	l, err := link.AttachCgroup(link.CgroupOptions{
 		Path:    m.cfg.CgroupPath,
 		Attach:  ebpf.AttachCGroupSockOps,
-		Program: prog,
+		Program: objs.GecitSockops,
 	})
 	if err != nil {
-		coll.Close()
+		objs.Close()
+		m.objs = nil
 		return fmt.Errorf("attach cgroup sock_ops: %w", err)
 	}
 	m.link = l
@@ -130,12 +117,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		return fmt.Errorf("push exclude IPs: %w", err)
 	}
 
-	eventsMap := coll.Maps["conn_events"]
-	if eventsMap == nil {
-		m.Stop()
-		return errMapNotFound("conn_events")
-	}
-	rd, err := perf.NewReader(eventsMap, 4096)
+	rd, err := perf.NewReader(objs.ConnEvents, 4096)
 	if err != nil {
 		m.Stop()
 		return fmt.Errorf("open perf reader: %w", err)
@@ -181,7 +163,7 @@ func (m *Manager) readEvents(ctx context.Context) {
 			continue
 		}
 
-		var evt connEvent
+		var evt gecitbpf.ConnEvent
 		evt.SrcIP = binary.NativeEndian.Uint32(record.RawSample[0:4])
 		evt.DstIP = binary.NativeEndian.Uint32(record.RawSample[4:8])
 		evt.SrcPort = binary.NativeEndian.Uint16(record.RawSample[8:10])
@@ -193,7 +175,7 @@ func (m *Manager) readEvents(ctx context.Context) {
 	}
 }
 
-func (m *Manager) injectFake(evt connEvent) {
+func (m *Manager) injectFake(evt gecitbpf.ConnEvent) {
 	conn := rawsock.ConnInfo{
 		SrcIP:   uint32ToIP(evt.SrcIP),
 		DstIP:   uint32ToIP(evt.DstIP),
@@ -208,7 +190,6 @@ func (m *Manager) injectFake(evt connEvent) {
 		return
 	}
 
-	// Resolve domain from DoH DNS cache (best-effort).
 	dst := fmt.Sprintf("%s:%d", conn.DstIP, conn.DstPort)
 	if dns := gecitdns.GetDNSServer(); dns != nil {
 		if domain := dns.PopDomain(conn.DstIP.String()); domain != "" {
@@ -244,9 +225,9 @@ func (m *Manager) Stop() error {
 		m.link.Close()
 		m.link = nil
 	}
-	if m.collection != nil {
-		m.collection.Close()
-		m.collection = nil
+	if m.objs != nil {
+		m.objs.Close()
+		m.objs = nil
 	}
 
 	m.logger.Info("gecit stopped")
@@ -257,8 +238,4 @@ func uint32ToIP(n uint32) net.IP {
 	ip := make(net.IP, 4)
 	binary.NativeEndian.PutUint32(ip, n)
 	return ip
-}
-
-func errMapNotFound(name string) error {
-	return fmt.Errorf("BPF map %q not found in collection", name)
 }
