@@ -1,5 +1,10 @@
 package app
 
+import gecitdns "github.com/boratanrikulu/gecit/pkg/dns"
+
 func platformCleanup() bool {
-	return false
+	if !gecitdns.SystemDNSNeedsRestore() {
+		return false
+	}
+	return gecitdns.RestoreSystemDNS() == nil
 }

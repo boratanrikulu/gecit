@@ -6,15 +6,15 @@ import (
 	"strings"
 )
 
-const resolvConf = "/etc/resolv.conf"
+var resolvConfPath = "/etc/resolv.conf"
 
 // SetSystemDNS comments out existing nameservers and adds 127.0.0.1.
 // Original lines are preserved as "# gecit-saved: ..." so they survive
 // a crash — RestoreSystemDNS (or manual edit) can recover them.
 func SetSystemDNS() error {
-	orig, err := os.ReadFile(resolvConf)
+	orig, err := os.ReadFile(resolvConfPath)
 	if err != nil {
-		return fmt.Errorf("read %s: %w", resolvConf, err)
+		return fmt.Errorf("read %s: %w", resolvConfPath, err)
 	}
 
 	var lines []string
@@ -33,14 +33,27 @@ func SetSystemDNS() error {
 		}
 	}
 
-	return os.WriteFile(resolvConf, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+	return os.WriteFile(resolvConfPath, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+}
+
+// SystemDNSNeedsRestore reports whether /etc/resolv.conf contains gecit-managed
+// state left behind by SetSystemDNS.
+func SystemDNSNeedsRestore() bool {
+	data, err := os.ReadFile(resolvConfPath)
+	if err != nil {
+		return false
+	}
+	return hasGecitDNSState(data)
 }
 
 // RestoreSystemDNS uncomments the original nameservers and removes gecit lines.
 func RestoreSystemDNS() error {
-	data, err := os.ReadFile(resolvConf)
+	data, err := os.ReadFile(resolvConfPath)
 	if err != nil {
 		return err
+	}
+	if !hasGecitDNSState(data) {
+		return nil
 	}
 
 	var lines []string
@@ -62,5 +75,15 @@ func RestoreSystemDNS() error {
 		lines = append(lines, "nameserver 8.8.8.8") // safe fallback
 	}
 
-	return os.WriteFile(resolvConf, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+	return os.WriteFile(resolvConfPath, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+}
+
+func hasGecitDNSState(data []byte) bool {
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "# gecit:") || strings.HasPrefix(trimmed, "# gecit-saved: ") {
+			return true
+		}
+	}
+	return false
 }
