@@ -35,7 +35,7 @@ func NewCapture(iface string, ports []uint16) (Detector, error) {
 		return nil, fmt.Errorf("pcap open %s: %w", iface, err)
 	}
 
-	filter := "tcp src port 443 and tcp[tcpflags] & (tcp-syn|tcp-ack) = (tcp-syn|tcp-ack)"
+	filter := synAckFilter(ports)
 	if err := handle.SetBPFFilter(filter); err != nil {
 		handle.Close()
 		return nil, fmt.Errorf("set BPF filter: %w", err)
