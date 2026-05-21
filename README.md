@@ -50,7 +50,30 @@ Additionally, some ISPs poison DNS responses. gecit includes a built-in DoH (DNS
 
 ## Installation
 
-### Pre-built binaries
+### Quick install (Linux, recommended)
+
+One line — detects arch, verifies SHA256, installs to `/usr/local/bin`, sets up a systemd service, enables and starts it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/boratanrikulu/gecit/main/scripts/install.sh | sudo bash
+```
+
+Optional flags and env vars:
+
+```bash
+# Pin a specific version
+curl -fsSL https://raw.githubusercontent.com/boratanrikulu/gecit/main/scripts/install.sh | sudo VERSION=v0.1.4 bash
+
+# Install but don't start the service
+curl -fsSL https://raw.githubusercontent.com/boratanrikulu/gecit/main/scripts/install.sh | sudo bash -s -- --no-start
+
+# Uninstall (stops + disables service, runs gecit cleanup, removes binary and unit file)
+curl -fsSL https://raw.githubusercontent.com/boratanrikulu/gecit/main/scripts/install.sh | sudo bash -s -- --uninstall
+```
+
+The installer requires Linux kernel 5.10+, systemd, and `amd64` or `arm64`. After installation, customize CLI flags (e.g. `--fake-ttl`, `--doh-upstream`) with `sudo systemctl edit gecit`.
+
+### Pre-built binaries (manual)
 
 Download from [releases](https://github.com/boratanrikulu/gecit/releases):
 
