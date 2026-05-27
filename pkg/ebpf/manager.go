@@ -185,7 +185,7 @@ func (m *Manager) injectFake(evt gecitbpf.ConnEvent) {
 		Ack:     evt.Ack,
 	}
 
-	if err := m.rawSock.SendFake(conn, fake.TLSClientHello, m.cfg.FakeTTL); err != nil {
+	if err := m.rawSock.SendFake(conn, fake.RandomTLSClientHello(), m.cfg.FakeTTL); err != nil {
 		m.logger.WithError(err).Warn("failed to send fake packet")
 		return
 	}
