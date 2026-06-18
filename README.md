@@ -136,9 +136,13 @@ sudo gecit cleanup
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--doh` | `true` | Enable the built-in DoH DNS resolver |
 | `--doh-upstream` | `cloudflare` | DoH upstream: preset name or URL. Comma-separated for fallback. |
 | `--fake-ttl` | `8` | TTL for fake packets (must reach DPI but expire before server) |
-| `--mss` | `40` | TCP MSS for ClientHello fragmentation (Linux) |
+| `--mss` | `88` | TCP MSS for ClientHello fragmentation (Linux) |
+| `--restore-after-bytes` | `600` | Restore normal MSS after N bytes (Linux) |
+| `--restore-mss` | `0` | Restored MSS value, 0 = auto/1460 (Linux) |
+| `--cgroup` | `/sys/fs/cgroup` | cgroup v2 path (Linux) |
 | `--ports` | `443` | Target destination ports |
 | `--interface` | auto | Network interface |
 | `-v` | off | Verbose/debug logging |

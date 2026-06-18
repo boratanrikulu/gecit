@@ -1,4 +1,4 @@
-.PHONY: all clean gecit-linux-amd64 gecit-linux-arm64 gecit-darwin-arm64 gecit-darwin-amd64 gecit-windows-amd64 \
+.PHONY: all clean vet lint fmt gecit-linux-amd64 gecit-linux-arm64 gecit-darwin-arm64 gecit-darwin-amd64 gecit-windows-amd64 \
         bpf-all bpf-clean bpf-translate bpf-compile install-gobee
 
 all: gecit-linux-amd64 gecit-linux-arm64
@@ -39,6 +39,9 @@ gecit-darwin-amd64:
 
 gecit-windows-amd64:
 	GOOS=windows GOARCH=amd64 go build -tags with_gvisor -o bin/gecit-windows-amd64.exe ./cmd/gecit
+
+vet:
+	go vet -tags with_gvisor ./...
 
 lint:
 	golangci-lint run ./...

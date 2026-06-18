@@ -132,9 +132,13 @@ sudo gecit cleanup
 
 | Parametre | Varsayılan | Açıklama |
 |-----------|-----------|----------|
+| `--doh` | `true` | Yerleşik DoH DNS çözücüyü etkinleştir |
 | `--doh-upstream` | `cloudflare` | DoH upstream: hazır isim veya URL. Virgülle ayrılarak yedekleme sırası. |
 | `--fake-ttl` | `8` | Sahte paket TTL değeri |
-| `--mss` | `40` | TCP MSS (Linux) |
+| `--mss` | `88` | TCP MSS (Linux) |
+| `--restore-after-bytes` | `600` | N bayt sonra normal MSS'e dön (Linux) |
+| `--restore-mss` | `0` | Geri dönülen MSS değeri, 0 = otomatik/1460 (Linux) |
+| `--cgroup` | `/sys/fs/cgroup` | cgroup v2 yolu (Linux) |
 | `--ports` | `443` | Hedef portlar |
 | `--interface` | otomatik | Ağ arayüzü |
 | `-v` | kapalı | Ayrıntılı loglama |
