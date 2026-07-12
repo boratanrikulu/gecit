@@ -28,6 +28,7 @@ func newPlatformEngine(cfg engine.Config, logger *logrus.Logger) (engine.Engine,
 		Ports:     cfg.Ports,
 		FakeTTL:   cfg.FakeTTL,
 		Interface: cfg.Interface,
+		Domains:   cfg.Domains,
 	}, logger)
 
 	return &tunEngine{

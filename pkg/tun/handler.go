@@ -47,8 +47,19 @@ func (h *handler) NewConnectionEx(
 	defer conn.Close()
 
 	dstPort := destination.Port
-	addr := net.JoinHostPort(destination.AddrString(), fmt.Sprint(dstPort))
-	dst := resolveDst(addr, destination.AddrString(), dstPort)
+	dstIP := destination.AddrString()
+	addr := net.JoinHostPort(dstIP, fmt.Sprint(dstPort))
+
+	h.mgr.logger.WithFields(logrus.Fields{
+		"dst":  dstIP,
+		"port": dstPort,
+	}).Debug("connection arrived")
+
+	if !h.mgr.IsTargetIP(dstIP) {
+		return
+	}
+
+	dst := resolveDst(addr, dstIP, dstPort)
 
 	serverConn, err := h.mgr.dialServer("tcp", addr, 5*time.Second)
 	if err != nil {
@@ -62,6 +73,7 @@ func (h *handler) NewConnectionEx(
 		return
 	}
 
+	h.mgr.logger.WithField("dst", dst).Info("target connection — injecting fake ClientHelos")
 	h.injectAndForward(conn, serverConn, dst)
 }
 
@@ -129,7 +141,12 @@ func (h *handler) NewPacketConnectionEx(
 	}
 	defer conn.Close()
 
-	addr := net.JoinHostPort(destination.AddrString(), fmt.Sprint(destination.Port))
+	dstIP := destination.AddrString()
+	if !h.mgr.IsTargetIP(dstIP) {
+		return
+	}
+
+	addr := net.JoinHostPort(dstIP, fmt.Sprint(destination.Port))
 	realConn, err := h.mgr.dialServer("udp", addr, 5*time.Second)
 	if err != nil {
 		return

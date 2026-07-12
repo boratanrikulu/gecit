@@ -27,6 +27,7 @@ func init() {
 	runCmd.Flags().Int("restore-mss", 0, "restored MSS value, 0 = auto/1460 (Linux only)")
 	runCmd.Flags().String("cgroup", "/sys/fs/cgroup", "cgroup v2 path (Linux only)")
 	runCmd.Flags().BoolP("verbose", "v", false, "enable debug logging")
+	runCmd.Flags().StringSlice("domains", nil, "target domains to route through TUN — macOS/Windows only (default: route all traffic)")
 
 	viper.BindPFlag("verbose", runCmd.Flags().Lookup("verbose"))
 	viper.BindPFlag("fake_ttl", runCmd.Flags().Lookup("fake-ttl"))
@@ -36,6 +37,7 @@ func init() {
 	viper.BindPFlag("restore_after_bytes", runCmd.Flags().Lookup("restore-after-bytes"))
 	viper.BindPFlag("restore_mss", runCmd.Flags().Lookup("restore-mss"))
 	viper.BindPFlag("cgroup_path", runCmd.Flags().Lookup("cgroup"))
+	viper.BindPFlag("domains", runCmd.Flags().Lookup("domains"))
 
 	rootCmd.AddCommand(runCmd)
 }
@@ -61,6 +63,7 @@ func runEngine(cmd *cobra.Command, args []string) error {
 		FakeTTL:           viper.GetInt("fake_ttl"),
 		DoHEnabled:        viper.GetBool("doh_enabled"),
 		DoHUpstream:       viper.GetString("doh_upstream"),
+		Domains:           viper.GetStringSlice("domains"),
 	}
 
 	eng, err := newPlatformEngine(cfg, logger)

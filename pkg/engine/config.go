@@ -10,6 +10,7 @@ type Config struct {
 	FakeTTL           int      `yaml:"fake_ttl" mapstructure:"fake_ttl"`
 	DoHEnabled        bool     `yaml:"doh_enabled" mapstructure:"doh_enabled"`
 	DoHUpstream       string   `yaml:"doh_upstream" mapstructure:"doh_upstream"`
+	Domains           []string `yaml:"domains" mapstructure:"domains"`
 }
 
 func DefaultConfig() Config {
