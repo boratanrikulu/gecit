@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"time"
 
+	"github.com/boratanrikulu/gecit/pkg/domains"
 	"github.com/boratanrikulu/gecit/pkg/seqtrack"
 	"github.com/boratanrikulu/gecit/pkg/rawsock"
 	"github.com/sagernet/sing-tun"
@@ -23,6 +24,7 @@ type Config struct {
 	Ports     []uint16
 	FakeTTL   int
 	Interface string
+	Domains   []string
 }
 
 type Manager struct {
@@ -38,6 +40,7 @@ type Manager struct {
 	bindControl    control.Func
 	networkMonitor tun.NetworkUpdateMonitor
 	ifaceMonitor   tun.DefaultInterfaceMonitor
+	domainResolver *domains.Resolver
 }
 
 func NewManager(cfg Config, logger *logrus.Logger) *Manager {
@@ -81,7 +84,26 @@ func (m *Manager) Start(ctx context.Context) error {
 		return err
 	}
 
-	tunOpts := m.tunOptions()
+	domainsToResolve := m.cfg.Domains
+	if len(domainsToResolve) == 0 {
+		domainsToResolve = domains.DefaultDomains
+	}
+	m.domainResolver = domains.New(domainsToResolve, m.logger)
+	if err := m.domainResolver.Resolve(); err != nil {
+		m.logger.WithError(err).Warn("some domains failed to resolve — retrying")
+	}
+	resolvedIPs := m.domainResolver.IPs()
+	if len(resolvedIPs) == 0 {
+		m.rawSock.Close()
+		return fmt.Errorf("no target domains resolved to any IP — cannot route")
+	}
+	m.logger.WithField("count", len(resolvedIPs)).Info("target domains resolved")
+	for _, ip := range resolvedIPs {
+		m.logger.WithField("ip", ip).Debug("resolved target IP")
+	}
+	m.domainResolver.StartRefresh(5 * time.Minute)
+
+	tunOpts := m.buildTunOptions(resolvedIPs)
 	tunDevice, err := tun.New(tunOpts)
 	if err != nil {
 		m.rawSock.Close()
@@ -123,10 +145,20 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 
 	m.logger.WithFields(logrus.Fields{
-		"tun":   tunName,
-		"ports": m.cfg.Ports,
-		"ttl":   m.cfg.FakeTTL,
-	}).Info("TUN engine active")
+		"tun":       tunName,
+		"ports":     m.cfg.Ports,
+		"ttl":       m.cfg.FakeTTL,
+		"interface": physIface,
+		"ips":       len(resolvedIPs),
+	}).Info("TUN engine active — routing target domains only")
+
+	m.logger.Debug("testing outbound connectivity")
+	if conn, err := (&net.Dialer{Timeout: 3 * time.Second, Control: m.bindControl}).DialContext(ctx, "tcp", "1.1.1.1:443"); err != nil {
+		m.logger.WithError(err).Warn("outbound connectivity test failed")
+	} else {
+		conn.Close()
+		m.logger.Debug("outbound connectivity test passed")
+	}
 
 	return nil
 }
@@ -158,8 +190,26 @@ func (m *Manager) Stop() error {
 	return nil
 }
 
+func (m *Manager) IsTargetIP(ip string) bool {
+	if m.domainResolver == nil {
+		return true
+	}
+	return m.domainResolver.ContainsIP(ip)
+}
+
 func (m *Manager) dialServer(network, addr string, timeout time.Duration) (net.Conn, error) {
-	return (&net.Dialer{Timeout: timeout, Control: m.bindControl}).DialContext(m.ctx, network, addr)
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		conn, err := (&net.Dialer{Timeout: timeout, Control: m.bindControl}).DialContext(m.ctx, network, addr)
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+		if attempt < 2 {
+			time.Sleep(time.Duration(50*(1<<attempt)) * time.Millisecond)
+		}
+	}
+	return nil, fmt.Errorf("dial failed after 3 attempts: %w", lastErr)
 }
 
 // DialContext dials via physical NIC, bypassing TUN. Exported for DoH client.
@@ -167,13 +217,21 @@ func (m *Manager) dialServer(network, addr string, timeout time.Duration) (net.C
 func (m *Manager) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	ctrl := m.bindControl
 	if ctrl == nil {
-		// Not yet initialized (called before Start). Build a temporary bind.
 		finder := control.NewDefaultInterfaceFinder()
-		iface := m.cfg.Interface
-		if iface == "" {
-			iface = detectPhysicalInterface()
+		ifName := m.cfg.Interface
+		if ifName == "" {
+			ifName = detectPhysicalInterface()
 		}
-		ctrl = control.Append(nil, control.BindToInterface(finder, iface, -1))
+		ifIndex := -1
+		if ifaces, err := net.Interfaces(); err == nil {
+			for _, iface := range ifaces {
+				if iface.Name == ifName {
+					ifIndex = iface.Index
+					break
+				}
+			}
+		}
+		ctrl = control.Append(nil, control.BindToInterface(finder, ifName, ifIndex))
 	}
 	return (&net.Dialer{Timeout: 5 * time.Second, Control: ctrl}).DialContext(ctx, network, addr)
 }
@@ -195,7 +253,24 @@ func (m *Manager) startSeqTracker(iface string) error {
 // monitor. These are required by sing-tun's AutoRoute for loop prevention.
 func (m *Manager) initNetworking(physIface string) error {
 	m.ifaceFinder = control.NewDefaultInterfaceFinder()
-	m.bindControl = control.Append(nil, control.BindToInterface(m.ifaceFinder, physIface, -1))
+
+	ifIndex := -1
+	if ifaces, err := net.Interfaces(); err == nil {
+		for _, iface := range ifaces {
+			if iface.Name == physIface {
+				ifIndex = iface.Index
+				break
+			}
+		}
+	}
+	if ifIndex == -1 {
+		return fmt.Errorf("interface %q not found", physIface)
+	}
+	m.logger.WithFields(logrus.Fields{
+		"interface": physIface,
+		"index":     ifIndex,
+	}).Debug("physical interface resolved")
+	m.bindControl = control.Append(nil, control.BindToInterface(m.ifaceFinder, physIface, ifIndex))
 
 	var err error
 	m.networkMonitor, err = tun.NewNetworkUpdateMonitor(singlog.Logger(m.logger))
@@ -218,15 +293,20 @@ func (m *Manager) initNetworking(physIface string) error {
 	return nil
 }
 
-func (m *Manager) tunOptions() tun.Options {
+func (m *Manager) buildTunOptions(resolvedIPs []string) tun.Options {
+	routes := make([]netip.Prefix, 0, len(resolvedIPs))
+	for _, ip := range resolvedIPs {
+		routes = append(routes, netip.MustParsePrefix(ip + "/32"))
+	}
 	return tun.Options{
-		Name:             "utun85",
-		Inet4Address:     []netip.Prefix{netip.MustParsePrefix("10.0.85.1/30")},
-		MTU:              tunMTU,
-		AutoRoute:        true,
-		InterfaceMonitor: m.ifaceMonitor,
-		InterfaceFinder:  m.ifaceFinder,
-		DNSServers: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
+		Name:              tun.CalculateInterfaceName(""),
+		Inet4Address:      []netip.Prefix{netip.MustParsePrefix("10.0.85.1/30")},
+		MTU:               tunMTU,
+		AutoRoute:         true,
+		Inet4RouteAddress: routes,
+		InterfaceMonitor:  m.ifaceMonitor,
+		InterfaceFinder:   m.ifaceFinder,
+		DNSServers:        []netip.Addr{netip.MustParseAddr("127.0.0.1")},
 	}
 }
 
