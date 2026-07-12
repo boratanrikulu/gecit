@@ -9,28 +9,32 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var DefaultDomains = []string{
-	"gateway.discord.gg",
-	"discord.com",
-	"cdn.discordapp.com",
-	"media.discordapp.net",
-	"us-east.discord.media",
-	"discord.gg",
-}
+type LookupFunc func(host string) ([]net.IP, error)
 
 type Resolver struct {
-	domains  []string
-	ips      map[string]bool
-	mu       sync.RWMutex
-	logger   *logrus.Logger
-	resolved bool
+	domains   []string
+	ips       map[string]bool
+	mu        sync.RWMutex
+	logger    *logrus.Logger
+	resolved  bool
+	lookupFn  LookupFunc
 }
 
 func New(domains []string, logger *logrus.Logger) *Resolver {
 	return &Resolver{
-		domains: domains,
-		ips:     make(map[string]bool),
-		logger:  logger,
+		domains:  domains,
+		ips:      make(map[string]bool),
+		logger:   logger,
+		lookupFn: net.LookupIP,
+	}
+}
+
+func NewWithLookup(domains []string, logger *logrus.Logger, lookup LookupFunc) *Resolver {
+	return &Resolver{
+		domains:  domains,
+		ips:      make(map[string]bool),
+		logger:   logger,
+		lookupFn: lookup,
 	}
 }
 
@@ -44,7 +48,7 @@ func (r *Resolver) Resolve() error {
 	var unresolved []string
 
 	for _, domain := range r.domains {
-		ips, err := net.LookupIP(domain)
+		ips, err := r.lookupFn(domain)
 		if err != nil {
 			unresolved = append(unresolved, domain)
 			r.logger.WithError(err).WithField("domain", domain).Debug("DNS lookup failed")
@@ -81,7 +85,7 @@ func (r *Resolver) IPs() []string {
 	return ips
 }
 
-// StartRefresh periodically re-resolves domains (Discord IPs change).
+// StartRefresh periodically re-resolves domains (Domain IP's can change).
 func (r *Resolver) StartRefresh(interval time.Duration) {
 	go func() {
 		ticker := time.NewTicker(interval)

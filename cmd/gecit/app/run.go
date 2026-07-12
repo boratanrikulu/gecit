@@ -27,7 +27,7 @@ func init() {
 	runCmd.Flags().Int("restore-mss", 0, "restored MSS value, 0 = auto/1460 (Linux only)")
 	runCmd.Flags().String("cgroup", "/sys/fs/cgroup", "cgroup v2 path (Linux only)")
 	runCmd.Flags().BoolP("verbose", "v", false, "enable debug logging")
-	runCmd.Flags().StringSlice("domains", nil, "target domains to route through TUN (default: Discord)")
+	runCmd.Flags().StringSlice("domains", nil, "target domains to route through TUN — macOS/Windows only (default: route all traffic)")
 
 	viper.BindPFlag("verbose", runCmd.Flags().Lookup("verbose"))
 	viper.BindPFlag("fake_ttl", runCmd.Flags().Lookup("fake-ttl"))

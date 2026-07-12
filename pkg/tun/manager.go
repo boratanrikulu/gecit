@@ -86,22 +86,26 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	domainsToResolve := m.cfg.Domains
 	if len(domainsToResolve) == 0 {
-		domainsToResolve = domains.DefaultDomains
+		m.logger.Info("no domains configured — routing all traffic")
 	}
-	m.domainResolver = domains.New(domainsToResolve, m.logger)
-	if err := m.domainResolver.Resolve(); err != nil {
-		m.logger.WithError(err).Warn("some domains failed to resolve — retrying")
+
+	var resolvedIPs []string
+	if len(domainsToResolve) > 0 {
+		m.domainResolver = domains.New(domainsToResolve, m.logger)
+		if err := m.domainResolver.Resolve(); err != nil {
+			m.logger.WithError(err).Warn("some domains failed to resolve — retrying")
+		}
+		resolvedIPs = m.domainResolver.IPs()
+		if len(resolvedIPs) == 0 {
+			m.rawSock.Close()
+			return fmt.Errorf("no target domains resolved to any IP — cannot route")
+		}
+		m.logger.WithField("count", len(resolvedIPs)).Info("target domains resolved")
+		for _, ip := range resolvedIPs {
+			m.logger.WithField("ip", ip).Debug("resolved target IP")
+		}
+		m.domainResolver.StartRefresh(5 * time.Minute)
 	}
-	resolvedIPs := m.domainResolver.IPs()
-	if len(resolvedIPs) == 0 {
-		m.rawSock.Close()
-		return fmt.Errorf("no target domains resolved to any IP — cannot route")
-	}
-	m.logger.WithField("count", len(resolvedIPs)).Info("target domains resolved")
-	for _, ip := range resolvedIPs {
-		m.logger.WithField("ip", ip).Debug("resolved target IP")
-	}
-	m.domainResolver.StartRefresh(5 * time.Minute)
 
 	tunOpts := m.buildTunOptions(resolvedIPs)
 	tunDevice, err := tun.New(tunOpts)
@@ -150,7 +154,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		"ttl":       m.cfg.FakeTTL,
 		"interface": physIface,
 		"ips":       len(resolvedIPs),
-	}).Info("TUN engine active — routing target domains only")
+	}).Info("TUN engine active")
 
 	m.logger.Debug("testing outbound connectivity")
 	if conn, err := (&net.Dialer{Timeout: 3 * time.Second, Control: m.bindControl}).DialContext(ctx, "tcp", "1.1.1.1:443"); err != nil {
@@ -294,20 +298,23 @@ func (m *Manager) initNetworking(physIface string) error {
 }
 
 func (m *Manager) buildTunOptions(resolvedIPs []string) tun.Options {
-	routes := make([]netip.Prefix, 0, len(resolvedIPs))
-	for _, ip := range resolvedIPs {
-		routes = append(routes, netip.MustParsePrefix(ip + "/32"))
-	}
-	return tun.Options{
+	opts := tun.Options{
 		Name:              tun.CalculateInterfaceName(""),
 		Inet4Address:      []netip.Prefix{netip.MustParsePrefix("10.0.85.1/30")},
 		MTU:               tunMTU,
 		AutoRoute:         true,
-		Inet4RouteAddress: routes,
 		InterfaceMonitor:  m.ifaceMonitor,
 		InterfaceFinder:   m.ifaceFinder,
 		DNSServers:        []netip.Addr{netip.MustParseAddr("127.0.0.1")},
 	}
+	if len(resolvedIPs) > 0 {
+		routes := make([]netip.Prefix, 0, len(resolvedIPs))
+		for _, ip := range resolvedIPs {
+			routes = append(routes, netip.MustParsePrefix(ip+"/32"))
+		}
+		opts.Inet4RouteAddress = routes
+	}
+	return opts
 }
 
 func detectPhysicalInterface() string {
