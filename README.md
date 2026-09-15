@@ -47,6 +47,7 @@ Additionally, some ISPs poison DNS responses. gecit includes a built-in DoH (DNS
 - **Npcap**: Download and install from [npcap.com](https://npcap.com/#download). Required for seq/ack extraction and fake packet injection.
 - **Windows Defender**: May flag gecit as `Win32/Wacapew.A!ml` (false positive). gecit creates a TUN interface, modifies DNS, and uses raw sockets - Defender flags this behavior. Add an exception: Windows Security → Virus & threat protection → Exclusions → Add gecit.exe.
 - **Run as Administrator**: Right-click PowerShell → "Run as Administrator", then run `.\gecit.exe run`.
+- **Unsigned installer**: gecit has no code-signing certificate, so SmartScreen shows a warning. Choose "More info" → "Run anyway".
 
 ## Installation
 
@@ -79,6 +80,29 @@ sudo ./gecit run
 curl -L https://github.com/boratanrikulu/gecit/releases/latest/download/gecit-windows-amd64.exe -o gecit.exe
 gecit.exe run
 ```
+
+### Windows installer
+
+The MSI installs gecit to `C:\Program Files\gecit`, registers it as a Windows
+service, adds it to `PATH`, and writes a default config. Grab
+`gecit-<version>-amd64.msi` from [releases](https://github.com/boratanrikulu/gecit/releases).
+
+Install Npcap first. Its license forbids redistribution, so the MSI cannot
+bundle it and refuses to install without it.
+
+The installer asks whether gecit should start at boot, and for the DoH upstream
+and fake TTL. Uncheck the box to register the service without running it.
+
+For an unattended install:
+
+```powershell
+msiexec /i gecit-0.1.4-amd64.msi /qn DOHUPSTREAM=quad9 FAKETTL=12
+msiexec /i gecit-0.1.4-amd64.msi /qn AUTOSTART=0
+```
+
+Uninstall from Add/Remove Programs, or `msiexec /x gecit-0.1.4-amd64.msi /qn`.
+Uninstalling restores DNS and routes first. Your config file and logs are left
+in place.
 
 ### Building from source
 
@@ -132,6 +156,44 @@ sudo gecit status
 sudo gecit cleanup
 ```
 
+### Windows service
+
+```powershell
+gecit service install     # register with Windows, start at boot
+gecit service start
+gecit service status
+gecit service stop
+gecit service restart
+gecit service set-start --manual   # stop starting at boot
+gecit service uninstall
+```
+
+The MSI does this for you. These commands are for a plain `gecit.exe` without
+the installer, and for changing an installed service afterwards.
+
+The service logs to `C:\ProgramData\gecit\gecit.log`, rotating at 10 MB and
+keeping 3 files. Start, stop and start failures also land in the Windows
+Application event log under the source `gecit`.
+
+### Config file
+
+A service started by Windows has no command line, so gecit reads settings from
+a file. Flags you pass still win over it.
+
+| Platform | Path |
+|---|---|
+| Linux, macOS | `/etc/gecit/config.yaml` |
+| Windows | `C:\ProgramData\gecit\config.yaml` |
+
+```bash
+gecit config path          # print the path in use
+gecit config init          # write a commented default, never overwrites
+gecit --config ./my.yaml run
+```
+
+Running without a config file works exactly as before, on the built-in
+defaults.
+
 ### CLI flags
 
 | Flag | Default | Description |
@@ -146,6 +208,7 @@ sudo gecit cleanup
 | `--ports` | `443` | Target destination ports |
 | `--interface` | auto | Network interface |
 | `-v` | off | Verbose/debug logging |
+| `--config` | per-platform | Config file path (see Config file above) |
 
 ### DoH presets
 

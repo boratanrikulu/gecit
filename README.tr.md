@@ -45,6 +45,7 @@ Bazı ISP'ler DNS yanıtlarını da zehirler. gecit, dahili DoH sunucusu ile DNS
 - **Npcap**: [npcap.com](https://npcap.com/#download) adresinden indirip kurun. seq/ack çıkarma ve sahte paket enjeksiyonu için gereklidir.
 - **Windows Defender**: gecit'i `Win32/Wacapew.A!ml` olarak işaretleyebilir (yanlış pozitif). gecit TUN arayüzü oluşturur, DNS'i değiştirir ve raw socket kullanır - Defender bu davranışları şüpheli bulur. İstisna ekleyin: Windows Güvenlik → Virüs ve tehdit koruması → Dışlamalar → gecit.exe ekleyin.
 - **Yönetici olarak çalıştırın**: PowerShell'e sağ tıklayıp "Yönetici olarak çalıştır" seçin, ardından `.\gecit.exe run` çalıştırın.
+- **İmzasız kurulum**: gecit'in kod imzalama sertifikası yok, bu yüzden SmartScreen uyarı gösterir. "Ek bilgi" → "Yine de çalıştır" deyin.
 
 ## Kurulum
 
@@ -77,6 +78,31 @@ sudo ./gecit run
 curl -L https://github.com/boratanrikulu/gecit/releases/latest/download/gecit-windows-amd64.exe -o gecit.exe
 gecit.exe run
 ```
+
+### Windows kurulum dosyası
+
+MSI, gecit'i `C:\Program Files\gecit` altına kurar, Windows servisi olarak
+kaydeder, `PATH`'e ekler ve varsayılan bir config dosyası yazar.
+`gecit-<sürüm>-amd64.msi` dosyasını [releases](https://github.com/boratanrikulu/gecit/releases)
+sayfasından indirin.
+
+Önce Npcap'i kurun. Lisansı yeniden dağıtıma izin vermediği için MSI onu
+içinde taşıyamıyor, Npcap yoksa kurulum başlamıyor.
+
+Kurulum sırasında gecit'in açılışta başlayıp başlamayacağı, DoH upstream'i ve
+sahte paket TTL'i soruluyor. Kutuyu işaretlemezseniz servis kaydedilir ama
+çalıştırılmaz.
+
+Sessiz kurulum için:
+
+```powershell
+msiexec /i gecit-0.1.4-amd64.msi /qn DOHUPSTREAM=quad9 FAKETTL=12
+msiexec /i gecit-0.1.4-amd64.msi /qn AUTOSTART=0
+```
+
+Kaldırmak için Program Ekle/Kaldır, ya da
+`msiexec /x gecit-0.1.4-amd64.msi /qn`. Kaldırma önce DNS ve route'ları eski
+haline döndürür. Config dosyanız ve loglar yerinde kalır.
 
 ### Kaynaktan derleme
 
@@ -128,6 +154,44 @@ sudo gecit status
 sudo gecit cleanup
 ```
 
+### Windows servisi
+
+```powershell
+gecit service install     # Windows'a kaydet, açılışta başlat
+gecit service start
+gecit service status
+gecit service stop
+gecit service restart
+gecit service set-start --manual   # açılışta başlatma
+gecit service uninstall
+```
+
+MSI bunları sizin yerinize yapıyor. Bu komutlar kurulum dosyası olmadan düz
+`gecit.exe` kullananlar ve kurulu servisi sonradan değiştirmek isteyenler için.
+
+Servis `C:\ProgramData\gecit\gecit.log` dosyasına yazar, 10 MB'da döner ve 3
+dosya saklar. Başlatma, durdurma ve başlatma hataları ayrıca Windows Uygulama
+olay günlüğüne `gecit` kaynağı altında düşer.
+
+### Config dosyası
+
+Windows'un başlattığı bir servisin komut satırı olmadığı için gecit ayarları
+dosyadan okuyor. Elle verdiğiniz parametreler yine de dosyadakinin önüne geçer.
+
+| Platform | Yol |
+|---|---|
+| Linux, macOS | `/etc/gecit/config.yaml` |
+| Windows | `C:\ProgramData\gecit\config.yaml` |
+
+```bash
+gecit config path          # kullanılan yolu yazdır
+gecit config init          # yorumlu varsayılanı yaz, var olanı ezmez
+gecit --config ./my.yaml run
+```
+
+Config dosyası olmadan çalıştırmak eskisi gibi, yerleşik varsayılanlarla
+çalışır.
+
 ### Parametreler
 
 | Parametre | Varsayılan | Açıklama |
@@ -142,6 +206,7 @@ sudo gecit cleanup
 | `--ports` | `443` | Hedef portlar |
 | `--interface` | otomatik | Ağ arayüzü |
 | `-v` | kapalı | Ayrıntılı loglama |
+| `--config` | platforma göre | Config dosyası yolu (Config dosyası bölümüne bakın) |
 
 ### DoH hazır ayarları
 
