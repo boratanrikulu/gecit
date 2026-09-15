@@ -1,13 +1,7 @@
 package app
 
 import (
-	"context"
-	"os"
-	"os/signal"
-	"syscall"
-
 	"github.com/boratanrikulu/gecit/pkg/engine"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -45,11 +39,7 @@ func runEngine(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	logger := logrus.New()
-	logger.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
-	if viper.GetBool("verbose") {
-		logger.SetLevel(logrus.DebugLevel)
-	}
+	logger := newLogger(viper.GetBool("verbose"))
 
 	cfg := engine.Config{
 		MSS:               viper.GetInt("mss"),
@@ -68,21 +58,7 @@ func runEngine(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	if err := eng.Start(ctx); err != nil {
-		return err
-	}
-
-	logger.WithField("mode", eng.Mode()).Info("gecit is running — press Ctrl+C to stop")
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	<-sigCh
-
-	logger.Info("shutting down...")
-	return eng.Stop()
+	return supervise(eng, logger)
 }
 
 func toUint16Slice(ints []int) []uint16 {
