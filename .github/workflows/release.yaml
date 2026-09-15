@@ -102,10 +102,76 @@ jobs:
           name: gecit-${{ matrix.os }}-${{ matrix.arch }}
           path: gecit-${{ matrix.os }}-${{ matrix.arch }}*
 
+  msi:
+    name: Build MSI
+    runs-on: windows-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Windows binary
+        uses: actions/download-artifact@v4
+        with:
+          name: gecit-windows-amd64
+
+      # MSI versions are numeric, and only the first three fields are compared
+      # for upgrade detection. A pre-release tag has no legal mapping, so those
+      # releases ship without an MSI rather than with a mislabelled one.
+      - name: Resolve MSI version
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -match '^v(\d+\.\d+\.\d+)$') {
+            "version=$($Matches[1])" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "$tag is not a numeric release tag, skipping the MSI"
+            "version=" >> $env:GITHUB_OUTPUT
+          }
+
+      - uses: actions/setup-dotnet@v4
+        if: steps.version.outputs.version != ''
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install WiX
+        if: steps.version.outputs.version != ''
+        run: |
+          dotnet tool install --global wix --version 6.0.1
+          wix extension add -g WixToolset.UI.wixext/6.0.1
+          wix extension add -g WixToolset.Util.wixext/6.0.1
+
+      - name: Build MSI
+        if: steps.version.outputs.version != ''
+        shell: pwsh
+        run: |
+          ./packaging/windows/build.ps1 `
+            -Version "${{ steps.version.outputs.version }}" `
+            -BinaryPath ./gecit-windows-amd64.exe
+          Move-Item packaging/windows/*.msi .
+
+      - name: Upload MSI
+        if: steps.version.outputs.version != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: gecit-windows-amd64-msi
+          path: '*.msi'
+          if-no-files-found: error
+
+      # The .wixpdb is what makes a failed install diagnosable later.
+      - name: Upload build symbols
+        if: always() && steps.version.outputs.version != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: msi-wixpdb
+          path: packaging/windows/*.wixpdb
+          if-no-files-found: ignore
+          retention-days: 7
+
   release:
     name: Create release
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, msi]
     steps:
       - uses: actions/checkout@v4
 
@@ -137,4 +203,5 @@ jobs:
             release/gecit-darwin-amd64
             release/gecit-darwin-arm64
             release/gecit-windows-amd64.exe
+            release/*.msi
             release/checksums.txt
