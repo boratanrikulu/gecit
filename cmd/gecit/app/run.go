@@ -41,7 +41,16 @@ func runEngine(cmd *cobra.Command, args []string) error {
 
 	logger := newLogger(viper.GetBool("verbose"))
 
-	cfg := engine.Config{
+	eng, err := newPlatformEngine(engineConfigFromViper(), logger)
+	if err != nil {
+		return err
+	}
+
+	return supervise(eng, logger)
+}
+
+func engineConfigFromViper() engine.Config {
+	return engine.Config{
 		MSS:               viper.GetInt("mss"),
 		RestoreMSS:        viper.GetInt("restore_mss"),
 		RestoreAfterBytes: viper.GetInt("restore_after_bytes"),
@@ -52,13 +61,6 @@ func runEngine(cmd *cobra.Command, args []string) error {
 		DoHEnabled:        viper.GetBool("doh_enabled"),
 		DoHUpstream:       viper.GetString("doh_upstream"),
 	}
-
-	eng, err := newPlatformEngine(cfg, logger)
-	if err != nil {
-		return err
-	}
-
-	return supervise(eng, logger)
 }
 
 func toUint16Slice(ints []int) []uint16 {
