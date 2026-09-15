@@ -80,7 +80,7 @@ gecit.exe run
 
 ### Kaynaktan derleme
 
-Go 1.24+ gereklidir. Linux için kernel 5.10+, clang ve llvm-strip gerekir. Windows için [Npcap SDK](https://npcap.com/guide/npcap-devguide.html) gerekir.
+Go 1.24+ gereklidir. Linux için kernel 5.10+, clang ve llvm-strip gerekir. Windows derlemesi saf Go, her platformdan cross-compile edilir.
 
 ```bash
 git clone https://github.com/boratanrikulu/gecit.git
@@ -90,7 +90,7 @@ make gecit-linux-amd64    # Linux x86_64
 make gecit-linux-arm64    # Linux ARM64
 make gecit-darwin-arm64   # macOS Apple Silicon
 make gecit-darwin-amd64   # macOS Intel
-make gecit-windows-amd64  # Windows x86_64 (Npcap SDK gerekli)
+make gecit-windows-amd64  # Windows x86_64
 
 sudo ./bin/gecit-linux-arm64 run
 ```

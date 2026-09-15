@@ -82,7 +82,7 @@ gecit.exe run
 
 ### Building from source
 
-Requires Go 1.24+. Linux builds need kernel 5.10+, clang, and llvm-strip for BPF compilation. Windows builds need [Npcap SDK](https://npcap.com/guide/npcap-devguide.html).
+Requires Go 1.24+. Linux builds need kernel 5.10+, clang, and llvm-strip for BPF compilation. Windows builds are pure Go and cross-compile from any host.
 
 ```bash
 git clone https://github.com/boratanrikulu/gecit.git
@@ -92,7 +92,7 @@ make gecit-linux-amd64    # Linux x86_64
 make gecit-linux-arm64    # Linux ARM64
 make gecit-darwin-arm64   # macOS Apple Silicon
 make gecit-darwin-amd64   # macOS Intel
-make gecit-windows-amd64  # Windows x86_64 (requires Npcap SDK)
+make gecit-windows-amd64  # Windows x86_64
 
 sudo ./bin/gecit-linux-arm64 run
 ```

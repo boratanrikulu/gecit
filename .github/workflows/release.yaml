@@ -62,8 +62,8 @@ jobs:
             tags: with_gvisor
           - os: windows
             arch: amd64
-            runner: windows-latest
-            cgo: 1
+            runner: ubuntu-latest
+            cgo: 0
             tags: with_gvisor
 
     steps:
@@ -82,16 +82,6 @@ jobs:
       - name: Install libpcap (macOS)
         if: matrix.os == 'darwin'
         run: brew install libpcap || true
-
-      - name: Install Npcap SDK and MinGW (Windows)
-        if: matrix.os == 'windows'
-        shell: pwsh
-        run: |
-          Invoke-WebRequest -Uri "https://npcap.com/dist/npcap-sdk-1.13.zip" -OutFile npcap-sdk.zip
-          Expand-Archive npcap-sdk.zip -DestinationPath npcap-sdk
-          choco install mingw -y
-          echo "CGO_CFLAGS=-I${{ github.workspace }}\npcap-sdk\Include" >> $env:GITHUB_ENV
-          echo "CGO_LDFLAGS=-L${{ github.workspace }}\npcap-sdk\Lib\x64 -lwpcap" >> $env:GITHUB_ENV
 
       - name: Build
         env:

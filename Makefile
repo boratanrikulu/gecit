@@ -38,7 +38,7 @@ gecit-darwin-amd64:
 	GOOS=darwin GOARCH=amd64 go build -tags with_gvisor -o bin/gecit-darwin-amd64 ./cmd/gecit
 
 gecit-windows-amd64:
-	GOOS=windows GOARCH=amd64 go build -tags with_gvisor -o bin/gecit-windows-amd64.exe ./cmd/gecit
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -tags with_gvisor -o bin/gecit-windows-amd64.exe ./cmd/gecit
 
 vet:
 	go vet -tags with_gvisor ./...
