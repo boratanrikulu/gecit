@@ -9,8 +9,8 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/boratanrikulu/gecit/pkg/seqtrack"
 	"github.com/boratanrikulu/gecit/pkg/rawsock"
+	"github.com/boratanrikulu/gecit/pkg/seqtrack"
 	"github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/control"
 	singlog "github.com/sagernet/sing/common/logger"
@@ -226,7 +226,7 @@ func (m *Manager) tunOptions() tun.Options {
 		AutoRoute:        true,
 		InterfaceMonitor: m.ifaceMonitor,
 		InterfaceFinder:  m.ifaceFinder,
-		DNSServers: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
+		DNSServers:       []netip.Addr{netip.MustParseAddr("127.0.0.1")},
 	}
 }
 
@@ -260,4 +260,3 @@ func detectPhysicalInterface() string {
 	}
 	return ""
 }
-

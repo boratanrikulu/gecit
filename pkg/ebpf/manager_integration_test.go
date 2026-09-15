@@ -18,9 +18,9 @@ func TestManagerStartStop(t *testing.T) {
 	logger.SetOutput(&bytes.Buffer{})
 
 	mgr := NewManager(Config{
-		Ports:    []uint16{443},
-		FakeTTL:  8,
-		MSS:      40,
+		Ports:   []uint16{443},
+		FakeTTL: 8,
+		MSS:     40,
 	}, logger)
 
 	ctx := context.Background()

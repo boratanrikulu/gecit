@@ -11,8 +11,8 @@ import (
 
 	gecitdns "github.com/boratanrikulu/gecit/pkg/dns"
 	"github.com/boratanrikulu/gecit/pkg/fake"
-	"github.com/boratanrikulu/gecit/pkg/seqtrack"
 	"github.com/boratanrikulu/gecit/pkg/rawsock"
+	"github.com/boratanrikulu/gecit/pkg/seqtrack"
 	singtun "github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/buf"
 	M "github.com/sagernet/sing/common/metadata"
