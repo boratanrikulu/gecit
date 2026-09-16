@@ -16,11 +16,12 @@ const (
 	eventStartFailed = 3
 )
 
-// Starting the TUN device and installing routes takes a few seconds, and the
-// SCM kills a service that goes quiet for too long while pending.
+// A pending state whose checkpoint stops moving within its wait hint is taken
+// for hung. Creating the TUN device and installing routes takes seconds, and
+// tearing them down again while restoring DNS takes longer than it looks.
 const (
 	startWaitHintMS = 30000
-	stopWaitHintMS  = 20000
+	stopWaitHintMS  = 45000
 )
 
 func supervise(eng engine.Engine, logger *logrus.Logger) error {
