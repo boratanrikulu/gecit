@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-bpf:
@@ -120,8 +120,10 @@ jobs:
       - name: Resolve MSI version
         id: version
         shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
-          $tag = "${{ github.ref_name }}"
+          $tag = $env:TAG
           if ($tag -match '^v(\d+\.\d+\.\d+)$') {
             "version=$($Matches[1])" >> $env:GITHUB_OUTPUT
           } else {
@@ -172,6 +174,8 @@ jobs:
     name: Create release
     runs-on: ubuntu-latest
     needs: [build, msi]
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 

@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 env:
   BPFVET_VERSION: "v0.2.1"
   BPFVET_SHA256: "79387d694285b762361c6385670544de3f04a329cdd3cd6b2cf41e339f979b56"
@@ -54,6 +57,9 @@ jobs:
 
       - name: Build
         run: go build -tags with_gvisor -o gecit.exe ./cmd/gecit
+
+      - name: Test
+        run: go test -tags with_gvisor -timeout 60s ./cmd/... ./pkg/dns/... ./pkg/fake/...
 
       - uses: actions/setup-dotnet@v4
         with:
