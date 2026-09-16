@@ -45,7 +45,7 @@ Bazı ISP'ler DNS yanıtlarını da zehirler. gecit, dahili DoH sunucusu ile DNS
 - **Npcap**: [npcap.com](https://npcap.com/#download) adresinden indirip kurun. seq/ack çıkarma ve sahte paket enjeksiyonu için gereklidir.
 - **Windows Defender**: gecit'i `Win32/Wacapew.A!ml` olarak işaretleyebilir (yanlış pozitif). gecit TUN arayüzü oluşturur, DNS'i değiştirir ve raw socket kullanır - Defender bu davranışları şüpheli bulur. İstisna ekleyin: Windows Güvenlik → Virüs ve tehdit koruması → Dışlamalar → gecit.exe ekleyin.
 - **Yönetici olarak çalıştırın**: PowerShell'e sağ tıklayıp "Yönetici olarak çalıştır" seçin, ardından `.\gecit.exe run` çalıştırın.
-- **İmzasız kurulum**: gecit'in kod imzalama sertifikası yok, bu yüzden SmartScreen uyarı gösterir. "Ek bilgi" → "Yine de çalıştır" deyin.
+- **İmzasız kurulum dosyası**: gecit'in kod imzalama sertifikası yok, bu yüzden SmartScreen uyarı gösterir. "Ek bilgi" → "Yine de çalıştır" deyin.
 
 ## Kurulum
 
@@ -87,10 +87,10 @@ kaydeder, `PATH`'e ekler ve varsayılan bir config dosyası yazar.
 sayfasından indirin.
 
 Önce Npcap'i kurun. Lisansı yeniden dağıtıma izin vermediği için MSI onu
-içinde taşıyamıyor, Npcap yoksa kurulum başlamıyor.
+içinde taşıyamaz, Npcap yoksa kurulum başlamaz.
 
 Kurulum sırasında gecit'in açılışta başlayıp başlamayacağı, DoH upstream'i ve
-sahte paket TTL'i soruluyor. Kutuyu işaretlemezseniz servis kaydedilir ama
+sahte paket TTL'i sorulur. Kutuyu işaretlemezseniz servis kaydedilir ama
 çalıştırılmaz.
 
 Sessiz kurulum için:
@@ -166,7 +166,7 @@ gecit service set-start --manual   # açılışta başlatma
 gecit service uninstall
 ```
 
-MSI bunları sizin yerinize yapıyor. Bu komutlar kurulum dosyası olmadan düz
+MSI bunları sizin yerinize yapar. Bu komutlar kurulum dosyası olmadan düz
 `gecit.exe` kullananlar ve kurulu servisi sonradan değiştirmek isteyenler için.
 
 Servis `C:\ProgramData\gecit\gecit.log` dosyasına yazar, 10 MB'da döner ve 3
@@ -176,7 +176,7 @@ olay günlüğüne `gecit` kaynağı altında düşer.
 ### Config dosyası
 
 Windows'un başlattığı bir servisin komut satırı olmadığı için gecit ayarları
-dosyadan okuyor. Elle verdiğiniz parametreler yine de dosyadakinin önüne geçer.
+dosyadan okur. Elle verdiğiniz parametreler yine de dosyadakinin önüne geçer.
 
 | Platform | Yol |
 |---|---|
@@ -189,8 +189,16 @@ gecit config init          # yorumlu varsayılanı yaz, var olanı ezmez
 gecit --config ./my.yaml run
 ```
 
-Config dosyası olmadan çalıştırmak eskisi gibi, yerleşik varsayılanlarla
-çalışır.
+Config dosyası yoksa gecit yerleşik varsayılanlarıyla çalışır.
+
+`config init` root ya da Yönetici ister: dosya, root veya LocalSystem olarak
+çalışan bir süreci yapılandırdığı için yetkisiz bir kullanıcının
+erişemeyeceği bir yere yazılır. Windows'ta dizin aynı sebeple açık bir ACL ile
+oluşturulur.
+
+`doh_upstream` ya bir preset adı ya da `https` URL olmalıdır. Şifresiz bir
+upstream, makinedeki her sorguyu yoldaki herkese teslim eder, üstelik gecit
+sistem çözücüsünü çoktan kendine yönlendirmiştir.
 
 ### Parametreler
 

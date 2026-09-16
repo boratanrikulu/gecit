@@ -191,8 +191,16 @@ gecit config init          # write a commented default, never overwrites
 gecit --config ./my.yaml run
 ```
 
-Running without a config file works exactly as before, on the built-in
-defaults.
+With no config file, gecit runs on its built-in defaults.
+
+`config init` needs root or Administrator: the file configures a process that
+runs as root or LocalSystem, so it is written where an unprivileged user
+cannot reach it. On Windows the directory is created with an explicit ACL for
+the same reason.
+
+`doh_upstream` must name a preset or an `https` URL. A cleartext upstream would
+hand every lookup on the machine to whoever is on the path, and gecit has
+already pointed the system resolver at itself.
 
 ### CLI flags
 
