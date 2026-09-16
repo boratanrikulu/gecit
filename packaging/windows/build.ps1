@@ -48,9 +48,12 @@ if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
     throw "wix is not on PATH. Install it with: dotnet tool install --global wix --version 6.0.1"
 }
 
+# Resolved before the Push-Location below, so a relative path means what the
+# caller meant by it rather than something under packaging/windows.
+$resolvedBinary = (Resolve-Path $BinaryPath).Path
+
 Push-Location $PSScriptRoot
 try {
-    $resolvedBinary = (Resolve-Path $BinaryPath).Path
     $output = Join-Path $PSScriptRoot "gecit-$Label-amd64.msi"
 
     Write-Host "building $output from $resolvedBinary"
