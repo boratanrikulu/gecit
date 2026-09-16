@@ -121,3 +121,20 @@ in this repo.
 - Config lives in `config.yaml`: `/etc/gecit/` on unix, `%ProgramData%\gecit\`
   on Windows. Adding a key means adding it to `configKeys` in
   `cmd/gecit/app/config.go`, or the loader rejects it as unknown.
+
+## Two invariants that look like cleanup opportunities
+
+Both were bugs once. Neither failure is visible without a Windows box.
+
+- **Only `run` loads the config file.** Do not hang `loadConfig` off
+  `rootCmd.PersistentPreRunE`. `cleanup` is what gives a machine its resolver
+  back after gecit took it, and the uninstaller calls it; a typo in
+  `config.yaml` must not be able to stop that. `status` and the `service` verbs
+  are the same argument.
+
+- **The service restart policy lives in `gecit service set-recovery`, not in
+  the MSI.** Restart actions alone do nothing here: the SCM runs them for a
+  reported stop only when `FailureActionsOnNonCrashFailures` is set, and a
+  failed engine start reports a stop with an exit code. MSI cannot set that
+  flag, so the installer calls the CLI. Moving this back into
+  `util:ServiceConfig` would compile, install, and never restart anything.
