@@ -234,20 +234,24 @@
         <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15" Transparent="yes" NoPrefix="yes"
                  Text="Everything here can be changed later." />
 
+        <!-- Every text control needs room for the lines its string actually
+             wraps to, and the next control has to start below that. A label
+             sized for one line truncates, and an edit placed inside a label's
+             box covers it. -->
         <Control Id="AutoStartCheckBox" Type="CheckBox" X="20" Y="60" Width="330" Height="17"
                  Property="AUTOSTART" CheckBoxValue="1"
                  Text="Start gecit automatically at boot" />
-        <Control Id="AutoStartNote" Type="Text" X="34" Y="78" Width="316" Height="24"
-                 Text="Leave this off to install the service without running it. Start it later with: gecit service start" />
+        <Control Id="AutoStartNote" Type="Text" X="34" Y="79" Width="316" Height="22"
+                 Text="Leave this off to install the service without starting it. Start it later with: gecit service start" />
 
-        <Control Id="UpstreamLabel" Type="Text" X="20" Y="115" Width="330" Height="24"
-                 Text="DoH upstream. A preset name (cloudflare, google, quad9, nextdns, adguard) or an https:// URL:" />
-        <Control Id="UpstreamEdit" Type="Edit" X="20" Y="129" Width="330" Height="18"
+        <Control Id="UpstreamLabel" Type="Text" X="20" Y="110" Width="330" Height="22"
+                 Text="DoH upstream: a preset (cloudflare, google, quad9, nextdns, adguard) or an https:// URL" />
+        <Control Id="UpstreamEdit" Type="Edit" X="20" Y="136" Width="330" Height="18"
                  Property="DOHUPSTREAM" />
 
-        <Control Id="TtlLabel" Type="Text" X="20" Y="158" Width="330" Height="12"
-                 Text="Fake packet TTL. High enough to reach the DPI middlebox, low enough to never reach the server:" />
-        <Control Id="TtlEdit" Type="Edit" X="20" Y="184" Width="60" Height="18"
+        <Control Id="TtlLabel" Type="Text" X="20" Y="164" Width="330" Height="22"
+                 Text="Fake packet TTL: high enough to reach the DPI middlebox, low enough to never reach the server" />
+        <Control Id="TtlEdit" Type="Edit" X="20" Y="190" Width="60" Height="18"
                  Property="FAKETTL" Integer="yes" />
 
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17"
