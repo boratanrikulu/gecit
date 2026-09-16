@@ -13,23 +13,36 @@
     the build fails to link.
 
 .PARAMETER Version
-    Numeric MSI version, x.y.z. Release tags carry a leading v, which is not
-    valid here and has to be stripped by the caller.
+    Numeric MSI version, x.y.z for a release or x.y.z.N for a release
+    candidate. Release tags carry a leading v, which is not valid here and has
+    to be stripped by the caller.
+
+    MSI compares only the first three fields, so 0.2.0.1 and 0.2.0 are the same
+    version to the installer. That is what lets a release install over its own
+    candidate, and it needs AllowSameVersionUpgrades, which gecit.wxs sets.
 
 .PARAMETER BinaryPath
     Path to the gecit.exe to package.
+
+.PARAMETER Label
+    Name to put in the output filename, defaulting to Version. The tag is more
+    recognisable than the numeric version for a candidate: 0.2.0-rc1 rather
+    than 0.2.0.1.
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Version,
-    [Parameter(Mandatory = $true)][string]$BinaryPath
+    [Parameter(Mandatory = $true)][string]$BinaryPath,
+    [string]$Label
 )
 
 $ErrorActionPreference = 'Stop'
 
-if ($Version -notmatch '^\d+\.\d+\.\d+$') {
-    throw "Version must be numeric x.y.z, got '$Version'. MSI rejects anything else, and only the first three fields are compared for upgrades."
+if ($Version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') {
+    throw "Version must be x.y.z or x.y.z.N, got '$Version'. MSI rejects anything else."
 }
+
+if (-not $Label) { $Label = $Version }
 
 if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
     throw "wix is not on PATH. Install it with: dotnet tool install --global wix --version 6.0.1"
@@ -38,7 +51,7 @@ if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
 Push-Location $PSScriptRoot
 try {
     $resolvedBinary = (Resolve-Path $BinaryPath).Path
-    $output = Join-Path $PSScriptRoot "gecit-$Version-amd64.msi"
+    $output = Join-Path $PSScriptRoot "gecit-$Label-amd64.msi"
 
     Write-Host "building $output from $resolvedBinary"
 

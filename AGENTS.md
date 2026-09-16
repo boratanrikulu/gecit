@@ -118,6 +118,11 @@ in this repo.
   period, no AI attribution.
 - Branches: `feat/<author>_<description>`, `fix/<author>_<description>`.
 - Format with `gofmt` before calling anything done.
+- Release tags are `vX.Y.Z`, candidates `vX.Y.Z-rcN`. The MSI version drops the
+  `v` and turns a candidate into a fourth field, so `v0.2.0-rc1` builds
+  `0.2.0.1`. MSI compares only the first three fields, which is why a release
+  installs over its own candidate and why `gecit.wxs` needs
+  `AllowSameVersionUpgrades`.
 - Config lives in `config.yaml`: `/etc/gecit/` on unix, `%ProgramData%\gecit\`
   on Windows. Adding a key means adding it to `configKeys` in
   `cmd/gecit/app/config.go`, or the loader rejects it as unknown.
