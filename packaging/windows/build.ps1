@@ -7,7 +7,6 @@
 
         dotnet tool install --global wix --version 6.0.1
         wix extension add -g WixToolset.UI.wixext/6.0.1
-        wix extension add -g WixToolset.Util.wixext/6.0.1
 
     Pin the extensions to the same version as the tool. An unpinned
     `wix extension add` resolves a newer extension than the pinned tool and
@@ -46,7 +45,6 @@ try {
     & wix build gecit.wxs `
         -arch x64 `
         -ext WixToolset.UI.wixext `
-        -ext WixToolset.Util.wixext `
         -d Version="$Version" `
         -d BinaryPath="$resolvedBinary" `
         -out $output

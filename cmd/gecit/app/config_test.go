@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/boratanrikulu/gecit/pkg/engine"
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
@@ -227,14 +228,32 @@ func TestToPortsRejectsOutOfRange(t *testing.T) {
 	}
 }
 
-// `config init` writes the file that loadConfig would refuse to read, so it
-// must not inherit the root's config-loading hook.
-func TestConfigInitSkipsConfigLoading(t *testing.T) {
-	if configInitCmd.PersistentPreRunE == nil {
-		t.Fatal("config init must shadow the root PersistentPreRunE")
+// A broken config file must not block the commands that repair a broken
+// machine. The installer runs `gecit cleanup` on uninstall, and `run` is the
+// only command that has any use for the file.
+func TestOnlyRunLoadsConfig(t *testing.T) {
+	if rootCmd.PersistentPreRunE != nil {
+		t.Error("a root PersistentPreRunE would gate cleanup, status and service on config parsing")
 	}
-	if err := configInitCmd.PersistentPreRunE(configInitCmd, nil); err != nil {
-		t.Errorf("config init hook should not read a config file, got %v", err)
+	for _, cmd := range []*cobra.Command{cleanupCmd, statusCmd, configInitCmd, configPathCmd} {
+		if cmd.PreRunE != nil || cmd.PersistentPreRunE != nil {
+			t.Errorf("%s should not load the config file", cmd.Name())
+		}
+	}
+}
+
+// checkConfigKeys compares file keys against configKeys using a viper view
+// that also holds every bound flag. A flag bound under a key missing from
+// configKeys would make every config load fail, on every command.
+func TestConfigKeysCoverBoundFlags(t *testing.T) {
+	known := make(map[string]bool, len(configKeys))
+	for _, k := range configKeys {
+		known[k] = true
+	}
+	for _, k := range viper.GetViper().AllKeys() {
+		if !known[k] {
+			t.Errorf("viper key %q is bound but missing from configKeys, so every config file would be rejected", k)
+		}
 	}
 }
 

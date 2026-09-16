@@ -71,7 +71,6 @@ jobs:
         run: |
           dotnet tool install --global wix --version 6.0.1
           wix extension add -g WixToolset.UI.wixext/6.0.1
-          wix extension add -g WixToolset.Util.wixext/6.0.1
 
       # Validates the installer authoring on every change, rather than finding
       # out at tag time. The version is a placeholder.

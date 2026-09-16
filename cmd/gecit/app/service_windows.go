@@ -72,6 +72,12 @@ var serviceStatusCmd = &cobra.Command{
 	RunE:  runServiceStatus,
 }
 
+var serviceSetRecoveryCmd = &cobra.Command{
+	Use:   "set-recovery",
+	Short: "Apply the restart-on-failure policy to an installed service",
+	RunE:  runServiceSetRecovery,
+}
+
 var serviceSetStartCmd = &cobra.Command{
 	Use:   "set-start",
 	Short: "Change whether the service starts at boot",
@@ -89,6 +95,7 @@ func init() {
 		serviceRestartCmd,
 		serviceStatusCmd,
 		serviceSetStartCmd,
+		serviceSetRecoveryCmd,
 	)
 	rootCmd.AddCommand(serviceCmd)
 }
@@ -151,6 +158,13 @@ func setRecoveryActions(s *mgr.Service) error {
 	}
 	if err := s.SetRecoveryActions(actions, uint32((24 * time.Hour).Seconds())); err != nil {
 		return fmt.Errorf("set recovery actions: %w", err)
+	}
+
+	// gecit reports a stop with an exit code when the engine fails to start.
+	// Without this flag the SCM only runs recovery actions for a service that
+	// dies without reporting anything, so the retries above would never fire.
+	if err := s.SetRecoveryActionsOnNonCrashFailures(true); err != nil {
+		return fmt.Errorf("enable recovery on reported failures: %w", err)
 	}
 	return nil
 }
@@ -297,6 +311,28 @@ func runServiceSetStart(cmd *cobra.Command, args []string) error {
 
 // openServiceForManage takes the full access the SCM demands for install,
 // start, stop and config changes. It needs elevation.
+// The MSI registers the service declaratively and then calls this, so both
+// install paths end up with one implementation of the policy.
+func runServiceSetRecovery(cmd *cobra.Command, args []string) error {
+	if err := checkPrivileges(); err != nil {
+		return err
+	}
+
+	m, s, err := openServiceForManage()
+	if err != nil {
+		return err
+	}
+	defer m.Disconnect()
+	defer s.Close()
+
+	if err := setRecoveryActions(s); err != nil {
+		return err
+	}
+
+	fmt.Printf("%s will restart twice on failure, then stop\n", serviceName)
+	return nil
+}
+
 func openServiceForManage() (*mgr.Mgr, *mgr.Service, error) {
 	m, err := mgr.Connect()
 	if err != nil {

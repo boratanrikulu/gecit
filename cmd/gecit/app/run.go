@@ -37,6 +37,9 @@ func init() {
 }
 
 func runEngine(cmd *cobra.Command, args []string) error {
+	if err := loadConfig(); err != nil {
+		return err
+	}
 	if err := checkPrivileges(); err != nil {
 		return err
 	}

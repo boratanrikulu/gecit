@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"github.com/boratanrikulu/gecit/pkg/engine"
 	"github.com/sirupsen/logrus"
@@ -21,6 +22,10 @@ const (
 const (
 	startWaitHintMS = 30000
 	stopWaitHintMS  = 20000
+
+	// Comfortably inside the shorter of the two hints, so the SCM always sees
+	// progress before it gives up.
+	progressInterval = 5 * time.Second
 )
 
 func supervise(eng engine.Engine, logger *logrus.Logger) error {
@@ -41,7 +46,7 @@ type serviceHandler struct {
 }
 
 func (h *serviceHandler) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {
-	changes <- svc.Status{State: svc.StartPending, WaitHint: startWaitHintMS}
+	stopProgress := h.reportProgress(changes, svc.StartPending, startWaitHintMS)
 
 	// A previous run that was killed rather than stopped leaves system DNS
 	// pointing at a resolver that is no longer listening. Clear that before
@@ -51,11 +56,15 @@ func (h *serviceHandler) Execute(args []string, r <-chan svc.ChangeRequest, chan
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := h.eng.Start(ctx); err != nil {
+	err := h.eng.Start(ctx)
+	stopProgress()
+
+	if err != nil {
 		h.logger.WithError(err).Error("engine failed to start")
 		h.eventError(eventStartFailed, "gecit failed to start: "+err.Error())
-		// A service-specific exit code is what makes the SCM run the
-		// configured recovery actions instead of recording a clean stop.
+		// Reported as a service-specific exit code so this reads as a
+		// failure rather than a clean stop. The SCM only turns that into a
+		// restart because install sets the non-crash failure flag.
 		return true, 1
 	}
 
@@ -83,9 +92,11 @@ loop:
 	// AcceptPreShutdown buys roughly 180 seconds at OS shutdown instead of the
 	// few seconds AcceptShutdown alone would give, which is what restoring DNS
 	// and tearing down routes needs.
-	changes <- svc.Status{State: svc.StopPending, WaitHint: stopWaitHintMS}
+	stopProgress = h.reportProgress(changes, svc.StopPending, stopWaitHintMS)
+	err = h.eng.Stop()
+	stopProgress()
 
-	if err := h.eng.Stop(); err != nil {
+	if err != nil {
 		h.logger.WithError(err).Error("engine failed to stop cleanly")
 		h.eventError(eventStopped, "gecit stopped with an error: "+err.Error())
 		return true, 1
@@ -94,6 +105,38 @@ loop:
 	h.logger.Info("gecit stopped")
 	h.eventInfo(eventStopped, "gecit stopped")
 	return false, 0
+}
+
+// reportProgress sends the pending status and then keeps incrementing its
+// checkpoint until the returned function is called. A pending state whose
+// checkpoint stops moving within WaitHint is treated as hung and killed, and
+// creating the TUN device and installing routes can outlast a single hint on
+// a slow boot.
+func (h *serviceHandler) reportProgress(changes chan<- svc.Status, state svc.State, waitHint uint32) func() {
+	changes <- svc.Status{State: state, CheckPoint: 0, WaitHint: waitHint}
+
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(progressInterval)
+		defer ticker.Stop()
+
+		for checkpoint := uint32(1); ; checkpoint++ {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				changes <- svc.Status{State: state, CheckPoint: checkpoint, WaitHint: waitHint}
+			}
+		}
+	}()
+
+	return func() {
+		close(done)
+		<-stopped
+	}
 }
 
 func (h *serviceHandler) eventInfo(id uint32, msg string) {

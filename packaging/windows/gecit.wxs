@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
-     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
-     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
 
   <?include parameters.wxi?>
 
@@ -34,12 +33,23 @@
          the elevated install; without it they are silently dropped.
          =================================================================== -->
 
-    <Property Id="AUTOSTART" Value="1" Secure="yes">
-      <!-- Remembered so an upgrade does not turn auto-start back on for
-           someone who switched it off. -->
+    <Property Id="AUTOSTART" Secure="yes" />
+
+    <!-- Remembered so an upgrade does not turn auto-start back on for someone
+         who switched it off. It is read into its own property because
+         AppSearch overwrites whatever it finds a signature for, including a
+         value passed on the command line. -->
+    <Property Id="AUTOSTART_PREVIOUS">
       <RegistrySearch Id="AutoStartRemembered" Root="HKLM" Key="SOFTWARE\gecit"
                       Name="AutoStart" Type="raw" Bitness="always64" />
     </Property>
+
+    <SetProperty Id="AUTOSTART" Action="AutoStartFromRegistry"
+                 Value="[AUTOSTART_PREVIOUS]" After="AppSearch"
+                 Condition="AUTOSTART_PREVIOUS AND NOT AUTOSTART" />
+
+    <SetProperty Id="AUTOSTART" Action="AutoStartDefault" Value="1"
+                 After="AutoStartFromRegistry" Condition="NOT AUTOSTART" />
 
     <Property Id="DOHUPSTREAM" Value="cloudflare" Secure="yes" />
     <Property Id="FAKETTL" Value="8" Secure="yes" />
@@ -98,15 +108,7 @@
                         Type="ownProcess"
                         Start="auto"
                         ErrorControl="normal"
-                        Vital="yes">
-          <!-- Retry twice, then stop, so a machine missing Npcap fails
-               visibly instead of restarting forever. -->
-          <util:ServiceConfig FirstFailureActionType="restart"
-                              SecondFailureActionType="restart"
-                              ThirdFailureActionType="none"
-                              RestartServiceDelayInSeconds="60"
-                              ResetPeriodInDays="1" />
-        </ServiceInstall>
+                        Vital="yes" />
 
         <ServiceControl Id="GecitServiceStopRemove"
                         Name="$(var.ServiceName)"
@@ -165,6 +167,15 @@
                   ExeCommand="&quot;[INSTALLFOLDER]gecit.exe&quot; config init --doh-upstream &quot;[DOHUPSTREAM]&quot; --fake-ttl &quot;[FAKETTL]&quot;"
                   Execute="deferred" Impersonate="no" Return="check" />
 
+    <!-- The restart policy needs the failure-actions flag as well as the
+         actions themselves, and MSI cannot set that flag: the core
+         ServiceConfig element is documented as not working as expected, and
+         the Util extension's has no attribute for it. gecit sets both, so the
+         installed service and a hand-installed one get the same policy. -->
+    <CustomAction Id="SetRecovery" Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[INSTALLFOLDER]gecit.exe&quot; service set-recovery"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
     <CustomAction Id="SetStartManual" Directory="INSTALLFOLDER"
                   ExeCommand="&quot;[INSTALLFOLDER]gecit.exe&quot; service set-start --manual"
                   Execute="deferred" Impersonate="no" Return="check" />
@@ -182,10 +193,13 @@
       <Custom Action="ConfigInit" After="InstallFiles"
               Condition="NOT Installed AND NOT PATCH" />
 
-      <Custom Action="SetStartManual" After="StartServices"
-              Condition="AUTOSTART &lt;&gt; &quot;1&quot;" />
+      <Custom Action="SetRecovery" After="InstallServices"
+              Condition="NOT Installed AND NOT PATCH" />
 
-      <Custom Action="RestoreSystemState" Before="StopServices"
+      <Custom Action="SetStartManual" After="StartServices"
+              Condition="AUTOSTART &lt;&gt; &quot;1&quot; AND NOT Installed AND NOT PATCH" />
+
+      <Custom Action="RestoreSystemState" After="DeleteServices"
               Condition="REMOVE=&quot;ALL&quot;" />
     </InstallExecuteSequence>
 
@@ -215,20 +229,22 @@
         <Control Id="AutoStartNote" Type="Text" X="34" Y="78" Width="316" Height="24"
                  Text="Leave this off to install the service without running it. Start it later with: gecit service start" />
 
-        <Control Id="UpstreamLabel" Type="Text" X="20" Y="115" Width="330" Height="12"
-                 Text="DoH upstream (cloudflare, google, quad9, nextdns, adguard, or a URL):" />
+        <Control Id="UpstreamLabel" Type="Text" X="20" Y="115" Width="330" Height="24"
+                 Text="DoH upstream. A preset name (cloudflare, google, quad9, nextdns, adguard) or an https:// URL:" />
         <Control Id="UpstreamEdit" Type="Edit" X="20" Y="129" Width="330" Height="18"
                  Property="DOHUPSTREAM" />
 
         <Control Id="TtlLabel" Type="Text" X="20" Y="158" Width="330" Height="12"
                  Text="Fake packet TTL. High enough to reach the DPI middlebox, low enough to never reach the server:" />
         <Control Id="TtlEdit" Type="Edit" X="20" Y="184" Width="60" Height="18"
-                 Property="FAKETTL" />
+                 Property="FAKETTL" Integer="yes" />
 
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17"
                  Text="!(loc.WixUIBack)" />
         <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes"
-                 Text="!(loc.WixUINext)" />
+                 Text="!(loc.WixUINext)">
+          <Publish Property="AUTOSTART" Value="0" Condition="NOT AUTOSTART" />
+        </Control>
         <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes"
                  Text="!(loc.WixUICancel)">
           <Publish Event="SpawnDialog" Value="CancelDlg" />

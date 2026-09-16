@@ -56,18 +56,10 @@ var configPathCmd = &cobra.Command{
 func init() {
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "",
 		"config file (default "+defaultConfigPath()+")")
-	rootCmd.PersistentPreRunE = loadConfig
 
 	defaults := engine.DefaultConfig()
 	configInitCmd.Flags().String("doh-upstream", defaults.DoHUpstream, "DoH upstream to write")
 	configInitCmd.Flags().Int("fake-ttl", defaults.FakeTTL, "fake packet TTL to write")
-
-	// init writes the file that loadConfig would refuse to read. cobra runs
-	// only the nearest PersistentPreRunE, so this one shadows the root's.
-	configInitCmd.PersistentPreRunE = func(*cobra.Command, []string) error { return nil }
-
-	// path has to work when the config is the thing that is broken.
-	configPathCmd.PersistentPreRunE = func(*cobra.Command, []string) error { return nil }
 
 	configCmd.AddCommand(configInitCmd, configPathCmd)
 	rootCmd.AddCommand(configCmd)
@@ -80,7 +72,11 @@ func resolveConfigPath() string {
 	return defaultConfigPath()
 }
 
-func loadConfig(cmd *cobra.Command, args []string) error {
+// loadConfig is called by `run` alone. cleanup, status and the service verbs
+// have to keep working when the config file is the broken thing: the installer
+// runs `gecit cleanup` on uninstall, and refusing there would leave the machine
+// pointing at a resolver that is being removed.
+func loadConfig() error {
 	return readConfigFile(viper.GetViper(), resolveConfigPath(), configPath != "")
 }
 
@@ -159,7 +155,7 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := createDataDir(filepath.Dir(path)); err != nil {
+	if err := prepareConfigDir(path); err != nil {
 		return err
 	}
 	if err := os.WriteFile(path, []byte(renderConfig(cfg)), 0o600); err != nil {
@@ -167,6 +163,20 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("wrote %s\n", path)
+	return nil
+}
+
+// prepareConfigDir hardens the directory gecit owns. A path the operator chose
+// with --config may hold unrelated files, and rewriting its ACL would demote
+// everyone else's access to them.
+func prepareConfigDir(path string) error {
+	dir := filepath.Dir(path)
+	if path == defaultConfigPath() {
+		return createDataDir(dir)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
+	}
 	return nil
 }
 
