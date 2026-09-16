@@ -129,13 +129,16 @@ jobs:
           $tag = $env:TAG
           if ($tag -match '^v(\d+\.\d+\.\d+)(?:-rc\.?(\d+))?$') {
             $version = $Matches[1]
-            if ($Matches[2]) {
-              $rc = [int]$Matches[2]
-              if ($rc -lt 1 -or $rc -gt 65535) {
-                throw "release candidate number must be 1-65535, got $rc"
-              }
-              $version = "$version.$rc"
+            $rc = if ($Matches[2]) { [int]$Matches[2] } else { 0 }
+            if ($Matches[2] -and ($rc -lt 1 -or $rc -gt 65535)) {
+              # Skip rather than fail: the release job needs this one, and a
+              # mistyped tag should still publish its binaries.
+              Write-Host "candidate number must be 1-65535, got $rc, skipping the MSI"
+              "version=" >> $env:GITHUB_OUTPUT
+              "label=" >> $env:GITHUB_OUTPUT
+              exit 0
             }
+            if ($rc -gt 0) { $version = "$version.$rc" }
             "version=$version" >> $env:GITHUB_OUTPUT
             "label=$($tag -replace '^v','')" >> $env:GITHUB_OUTPUT
           } else {
