@@ -26,7 +26,7 @@
 
 .PARAMETER Label
     Name to put in the output filename, defaulting to Version. The tag is more
-    recognisable than the numeric version for a candidate: 0.2.0-rc1 rather
+    recognisable than the numeric version for a candidate: 0.2.0-rc.1 rather
     than 0.2.0.1.
 #>
 [CmdletBinding()]

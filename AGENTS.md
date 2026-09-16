@@ -118,11 +118,15 @@ in this repo.
   period, no AI attribution.
 - Branches: `feat/<author>_<description>`, `fix/<author>_<description>`.
 - Format with `gofmt` before calling anything done.
-- Release tags are `vX.Y.Z`, candidates `vX.Y.Z-rcN`. The MSI version drops the
-  `v` and turns a candidate into a fourth field, so `v0.2.0-rc1` builds
-  `0.2.0.1`. MSI compares only the first three fields, which is why a release
-  installs over its own candidate and why `gecit.wxs` needs
-  `AllowSameVersionUpgrades`.
+- Release tags are `vX.Y.Z`, candidates `vX.Y.Z-rc.N`. The dot is required:
+  it makes the number a numeric identifier under SemVer, so `rc.10` sorts after
+  `rc.2`. Written `rc10` it is one alphanumeric identifier compared as text and
+  `rc10` sorts before `rc2`, which matters because gecit is a Go module people
+  `go install`. The release workflow only builds an MSI for these two shapes.
+- The MSI version drops the `v` and turns a candidate into a fourth field, so
+  `v0.2.0-rc.1` builds `0.2.0.1`. MSI compares only the first three fields,
+  which is why a release installs over its own candidate and why `gecit.wxs`
+  needs `AllowSameVersionUpgrades`.
 - Config lives in `config.yaml`: `/etc/gecit/` on unix, `%ProgramData%\gecit\`
   on Windows. Adding a key means adding it to `configKeys` in
   `cmd/gecit/app/config.go`, or the loader rejects it as unknown.

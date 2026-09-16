@@ -115,11 +115,16 @@ jobs:
           name: gecit-windows-amd64
 
       # MSI versions are numeric, so the tag maps rather than passes through.
-      # A candidate becomes a fourth field, v0.2.0-rc1 -> 0.2.0.1. MSI compares
+      # A candidate becomes a fourth field, v0.2.0-rc.1 -> 0.2.0.1. MSI compares
       # only the first three, so the candidate and its release are the same
       # version to the installer and AllowSameVersionUpgrades is what lets the
       # release install over it. The filename keeps the tag, which is easier to
       # recognise than the numeric form.
+      #
+      # The dot in -rc.N is required, not decorative. It makes the number a
+      # numeric identifier under SemVer, so rc.10 sorts after rc.2. Written
+      # rc10 it is one alphanumeric identifier compared as text, and rc10 would
+      # sort before rc2 for anyone running `go install`.
       - name: Resolve MSI version
         id: version
         shell: pwsh
@@ -127,7 +132,7 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           $tag = $env:TAG
-          if ($tag -match '^v(\d+\.\d+\.\d+)(?:-rc\.?(\d+))?$') {
+          if ($tag -match '^v(\d+\.\d+\.\d+)(?:-rc\.(\d+))?$') {
             $version = $Matches[1]
             $rc = if ($Matches[2]) { [int]$Matches[2] } else { 0 }
             if ($Matches[2] -and ($rc -lt 1 -or $rc -gt 65535)) {
@@ -142,7 +147,7 @@ jobs:
             "version=$version" >> $env:GITHUB_OUTPUT
             "label=$($tag -replace '^v','')" >> $env:GITHUB_OUTPUT
           } else {
-            Write-Host "$tag is not a release or release-candidate tag, skipping the MSI"
+            Write-Host "$tag is not vX.Y.Z or vX.Y.Z-rc.N, skipping the MSI"
             "version=" >> $env:GITHUB_OUTPUT
             "label=" >> $env:GITHUB_OUTPUT
           }
