@@ -3,7 +3,6 @@ package capture
 import (
 	"fmt"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/google/gopacket"
@@ -19,7 +18,7 @@ type pcapCapture struct {
 
 func NewCapture(iface string, ports []uint16) (Detector, error) {
 	if !NpcapAvailable() {
-		return nil, fmt.Errorf("Npcap not installed — required for DPI bypass on Windows (download from npcap.com)")
+		return nil, fmt.Errorf("Npcap not installed, required for DPI bypass on Windows (download from npcap.com)")
 	}
 
 	// Windows pcap needs device path (\Device\NPF_{GUID}), not friendly name.
@@ -156,14 +155,4 @@ func resolvePcapDevice(friendlyName string) (string, error) {
 func NpcapAvailable() bool {
 	_, err := pcap.FindAllDevs()
 	return err == nil
-}
-
-var npcapCheckOnce sync.Once
-var npcapInstalled bool
-
-func CheckNpcap() bool {
-	npcapCheckOnce.Do(func() {
-		npcapInstalled = NpcapAvailable()
-	})
-	return npcapInstalled
 }

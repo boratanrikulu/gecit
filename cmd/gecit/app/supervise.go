@@ -10,7 +10,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// runInteractive starts the engine and blocks until the operator interrupts it.
 func runInteractive(eng engine.Engine, logger *logrus.Logger) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -19,7 +18,7 @@ func runInteractive(eng engine.Engine, logger *logrus.Logger) error {
 		return err
 	}
 
-	logger.WithField("mode", eng.Mode()).Info("gecit is running — press Ctrl+C to stop")
+	logger.WithField("mode", eng.Mode()).Info("gecit is running, press Ctrl+C to stop")
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)

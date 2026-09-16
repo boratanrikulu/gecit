@@ -13,6 +13,9 @@ import (
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
+// The MSI registers the service from its own copy of these strings in
+// packaging/windows/parameters.wxi. They have to stay identical, or the
+// service these commands look for is not the one the installer created.
 const (
 	serviceName        = "gecit"
 	serviceDisplayName = "gecit DPI bypass"
@@ -33,22 +36,59 @@ var serviceCmd = &cobra.Command{
 	Short: "Manage the gecit Windows service",
 }
 
+var serviceInstallCmd = &cobra.Command{
+	Use:   "install",
+	Short: "Register the service with Windows",
+	RunE:  runServiceInstall,
+}
+
+var serviceUninstallCmd = &cobra.Command{
+	Use:   "uninstall",
+	Short: "Remove the service from Windows",
+	RunE:  runServiceUninstall,
+}
+
+var serviceStartCmd = &cobra.Command{
+	Use:   "start",
+	Short: "Start the service",
+	RunE:  runServiceStart,
+}
+
+var serviceStopCmd = &cobra.Command{
+	Use:   "stop",
+	Short: "Stop the service",
+	RunE:  runServiceStop,
+}
+
+var serviceRestartCmd = &cobra.Command{
+	Use:   "restart",
+	Short: "Restart the service",
+	RunE:  runServiceRestart,
+}
+
+var serviceStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show the service state",
+	RunE:  runServiceStatus,
+}
+
+var serviceSetStartCmd = &cobra.Command{
+	Use:   "set-start",
+	Short: "Change whether the service starts at boot",
+	RunE:  runServiceSetStart,
+}
+
 func init() {
-	setStartCmd := &cobra.Command{
-		Use:   "set-start",
-		Short: "Change whether the service starts at boot",
-		RunE:  runServiceSetStart,
-	}
-	setStartCmd.Flags().Bool("manual", false, "start only when asked, instead of at boot")
+	serviceSetStartCmd.Flags().Bool("manual", false, "start only when asked, instead of at boot")
 
 	serviceCmd.AddCommand(
-		&cobra.Command{Use: "install", Short: "Register the service with Windows", RunE: runServiceInstall},
-		&cobra.Command{Use: "uninstall", Short: "Remove the service from Windows", RunE: runServiceUninstall},
-		&cobra.Command{Use: "start", Short: "Start the service", RunE: runServiceStart},
-		&cobra.Command{Use: "stop", Short: "Stop the service", RunE: runServiceStop},
-		&cobra.Command{Use: "restart", Short: "Restart the service", RunE: runServiceRestart},
-		&cobra.Command{Use: "status", Short: "Show the service state", RunE: runServiceStatus},
-		setStartCmd,
+		serviceInstallCmd,
+		serviceUninstallCmd,
+		serviceStartCmd,
+		serviceStopCmd,
+		serviceRestartCmd,
+		serviceStatusCmd,
+		serviceSetStartCmd,
 	)
 	rootCmd.AddCommand(serviceCmd)
 }
