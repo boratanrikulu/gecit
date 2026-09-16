@@ -176,6 +176,14 @@
                   ExeCommand="&quot;[INSTALLFOLDER]gecit.exe&quot; service set-recovery"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
+    <!-- ServiceInstall can say auto but not delayed, and the engine needs a
+         usable NIC, so an ordinary auto-start races the network stack at boot.
+         A missed delay costs one failed start that the recovery policy
+         retries, so this never fails an install. -->
+    <CustomAction Id="SetStartAuto" Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[INSTALLFOLDER]gecit.exe&quot; service set-start"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
     <CustomAction Id="SetStartManual" Directory="INSTALLFOLDER"
                   ExeCommand="&quot;[INSTALLFOLDER]gecit.exe&quot; service set-start --manual"
                   Execute="deferred" Impersonate="no" Return="check" />
@@ -195,6 +203,9 @@
 
       <Custom Action="SetRecovery" After="InstallServices"
               Condition="NOT Installed AND NOT PATCH" />
+
+      <Custom Action="SetStartAuto" After="StartServices"
+              Condition="AUTOSTART = &quot;1&quot; AND NOT Installed AND NOT PATCH" />
 
       <Custom Action="SetStartManual" After="StartServices"
               Condition="AUTOSTART &lt;&gt; &quot;1&quot; AND NOT Installed AND NOT PATCH" />
