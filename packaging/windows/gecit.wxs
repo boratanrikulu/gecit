@@ -78,6 +78,10 @@
       <Directory Id="INSTALLFOLDER" Name="gecit" />
     </StandardDirectory>
 
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="DATAFOLDER" Name="gecit" />
+    </StandardDirectory>
+
     <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
 
       <Component Id="ServiceExe" Guid="791A36DA-FD30-450E-B982-045C84D8DA6C" Bitness="always64">
@@ -133,6 +137,19 @@
                         Wait="yes" />
       </Component>
 
+      <!-- The config and the log live here, and the service reads the config
+           as LocalSystem. ProgramData's default ACL lets any user create a
+           subdirectory and own what they create, so an unprivileged user
+           could otherwise hand the service its settings. P drops that
+           inheritance; the ACL is reapplied even if the directory already
+           exists. -->
+      <Component Id="DataFolder" Guid="6690CB0E-1EF1-4A6E-9609-2004FC753E4F"
+                 Directory="DATAFOLDER" Bitness="always64">
+        <CreateFolder>
+          <PermissionEx Sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)" />
+        </CreateFolder>
+      </Component>
+
     </ComponentGroup>
 
     <Feature Id="Main" Title="gecit" Level="1">
@@ -145,7 +162,7 @@
          =================================================================== -->
 
     <CustomAction Id="ConfigInit" Directory="INSTALLFOLDER"
-                  ExeCommand="&quot;[INSTALLFOLDER]gecit.exe&quot; config init --doh-upstream &quot;[DOHUPSTREAM]&quot; --fake-ttl [FAKETTL]"
+                  ExeCommand="&quot;[INSTALLFOLDER]gecit.exe&quot; config init --doh-upstream &quot;[DOHUPSTREAM]&quot; --fake-ttl &quot;[FAKETTL]&quot;"
                   Execute="deferred" Impersonate="no" Return="check" />
 
     <CustomAction Id="SetStartManual" Directory="INSTALLFOLDER"

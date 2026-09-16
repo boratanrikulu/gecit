@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -148,4 +150,42 @@ func NewResolver(upstreams string, dial DialFunc) Resolver {
 		return clients[0]
 	}
 	return &fallbackResolver{clients: clients}
+}
+
+// ValidateUpstreams rejects upstreams that would resolve names in cleartext.
+// gecit points the system resolver at itself, so an upstream that is not
+// HTTPS hands every lookup on the machine to whoever is on the path.
+func ValidateUpstreams(upstreams string) error {
+	if strings.TrimSpace(upstreams) == "" {
+		return errors.New("no upstream given")
+	}
+	for _, u := range strings.Split(upstreams, ",") {
+		u = strings.TrimSpace(u)
+		if u == "" {
+			return errors.New("empty upstream in list")
+		}
+		if _, ok := Presets[u]; ok {
+			continue
+		}
+		parsed, err := url.Parse(u)
+		if err != nil {
+			return fmt.Errorf("%q is not a preset or a URL: %w", u, err)
+		}
+		if parsed.Scheme != "https" {
+			return fmt.Errorf("%q must use https, or name a preset (%s)", u, presetNames())
+		}
+		if parsed.Host == "" {
+			return fmt.Errorf("%q has no host", u)
+		}
+	}
+	return nil
+}
+
+func presetNames() string {
+	names := make([]string, 0, len(Presets))
+	for name := range Presets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }

@@ -16,6 +16,12 @@ func setLogOutput(logger *logrus.Logger) {
 	if !underServiceManager() {
 		return
 	}
+	// Same directory the config lives in, so it needs the same ACL. A log
+	// nobody can read is better than a service a standard user can steer.
+	if err := createDataDir(gecitDataDir()); err != nil {
+		logger.WithError(err).Warn("could not secure the gecit data directory")
+	}
+
 	logger.SetFormatter(&logrus.TextFormatter{FullTimestamp: true, DisableColors: true})
 	logger.SetOutput(&lumberjack.Logger{
 		Filename:   logFilePath(),

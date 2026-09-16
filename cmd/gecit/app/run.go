@@ -1,6 +1,8 @@
 package app
 
 import (
+	"fmt"
+
 	"github.com/boratanrikulu/gecit/pkg/engine"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -41,7 +43,12 @@ func runEngine(cmd *cobra.Command, args []string) error {
 
 	logger := newLogger(viper.GetBool("verbose"))
 
-	eng, err := newPlatformEngine(engineConfigFromViper(), logger)
+	cfg, err := engineConfigFromViper(viper.GetViper())
+	if err != nil {
+		return err
+	}
+
+	eng, err := newPlatformEngine(cfg, logger)
 	if err != nil {
 		return err
 	}
@@ -49,24 +56,39 @@ func runEngine(cmd *cobra.Command, args []string) error {
 	return supervise(eng, logger)
 }
 
-func engineConfigFromViper() engine.Config {
-	return engine.Config{
-		MSS:               viper.GetInt("mss"),
-		RestoreMSS:        viper.GetInt("restore_mss"),
-		RestoreAfterBytes: viper.GetInt("restore_after_bytes"),
-		Ports:             toUint16Slice(viper.GetIntSlice("ports")),
-		Interface:         viper.GetString("interface"),
-		CgroupPath:        viper.GetString("cgroup_path"),
-		FakeTTL:           viper.GetInt("fake_ttl"),
-		DoHEnabled:        viper.GetBool("doh_enabled"),
-		DoHUpstream:       viper.GetString("doh_upstream"),
+func engineConfigFromViper(v *viper.Viper) (engine.Config, error) {
+	ports, err := toPorts(v.GetIntSlice("ports"))
+	if err != nil {
+		return engine.Config{}, err
 	}
+
+	cfg := engine.Config{
+		MSS:               v.GetInt("mss"),
+		RestoreMSS:        v.GetInt("restore_mss"),
+		RestoreAfterBytes: v.GetInt("restore_after_bytes"),
+		Ports:             ports,
+		Interface:         v.GetString("interface"),
+		CgroupPath:        v.GetString("cgroup_path"),
+		FakeTTL:           v.GetInt("fake_ttl"),
+		DoHEnabled:        v.GetBool("doh_enabled"),
+		DoHUpstream:       v.GetString("doh_upstream"),
+	}
+
+	if err := validateConfig(cfg); err != nil {
+		return engine.Config{}, err
+	}
+	return cfg, nil
 }
 
-func toUint16Slice(ints []int) []uint16 {
+// A port outside the uint16 range would otherwise wrap into a valid-looking
+// one: 70000 becomes 4464.
+func toPorts(ints []int) ([]uint16, error) {
 	out := make([]uint16, len(ints))
 	for i, v := range ints {
+		if v < 1 || v > 65535 {
+			return nil, fmt.Errorf("ports must be 1-65535, got %d", v)
+		}
 		out[i] = uint16(v)
 	}
-	return out
+	return out, nil
 }
