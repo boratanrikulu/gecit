@@ -1,0 +1,283 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <?include parameters.wxi?>
+
+  <Package Name="$(var.ProductName)"
+           Manufacturer="$(var.Manufacturer)"
+           Version="$(var.ProductVersion)"
+           ProductCode="$(var.ProductCode)"
+           UpgradeCode="$(var.UpgradeCode)"
+           Language="1033"
+           Compressed="yes"
+           InstallerVersion="500"
+           Scope="perMachine">
+
+    <SummaryInformation Description="$(var.PackageDescription)" />
+
+    <!-- afterInstallInitialize removes the old product before the new files
+         land, so the service is stopped and re-registered rather than briefly
+         owned by two products. -->
+    <MajorUpgrade Schedule="afterInstallInitialize"
+                  AllowSameVersionUpgrades="yes"
+                  AllowDowngrades="no"
+                  DowngradeErrorMessage="A newer version of [ProductName] is already installed. Uninstall it before installing this one." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/boratanrikulu/gecit" />
+
+    <!-- ===================================================================
+         Settings. Secure="yes" is what lets msiexec /qn pass them through to
+         the elevated install; without it they are silently dropped.
+         =================================================================== -->
+
+    <Property Id="AUTOSTART" Secure="yes" />
+
+    <!-- Remembered so an upgrade does not turn auto-start back on for someone
+         who switched it off. It is read into its own property because
+         AppSearch overwrites whatever it finds a signature for, including a
+         value passed on the command line. -->
+    <Property Id="AUTOSTART_PREVIOUS">
+      <RegistrySearch Id="AutoStartRemembered" Root="HKLM" Key="SOFTWARE\gecit"
+                      Name="AutoStart" Type="raw" Bitness="always64" />
+    </Property>
+
+    <SetProperty Id="AUTOSTART" Action="AutoStartFromRegistry"
+                 Value="[AUTOSTART_PREVIOUS]" After="AppSearch"
+                 Condition="AUTOSTART_PREVIOUS AND NOT AUTOSTART" />
+
+    <SetProperty Id="AUTOSTART" Action="AutoStartDefault" Value="1"
+                 After="AutoStartFromRegistry" Condition="NOT AUTOSTART" />
+
+    <Property Id="DOHUPSTREAM" Value="cloudflare" Secure="yes" />
+    <Property Id="FAKETTL" Value="8" Secure="yes" />
+    <Property Id="SKIPNPCAPCHECK" Secure="yes" />
+
+    <!-- ===================================================================
+         Npcap. Its license forbids redistribution, so gecit cannot bundle it
+         and has to check instead. The 64-bit Npcap installer still writes its
+         key into the 32-bit view.
+         =================================================================== -->
+
+    <Property Id="NPCAPREGISTERED">
+      <RegistrySearch Id="NpcapKey" Root="HKLM" Key="SOFTWARE\Npcap"
+                      Type="raw" Bitness="always32" />
+    </Property>
+
+    <Property Id="NPCAPDLL">
+      <DirectorySearch Id="SystemDir" Path="[SystemFolder]">
+        <DirectorySearch Id="NpcapDir" Path="Npcap">
+          <FileSearch Id="WpcapDll" Name="wpcap.dll" />
+        </DirectorySearch>
+      </DirectorySearch>
+    </Property>
+
+    <!-- Without Npcap gecit cannot read sequence numbers or inject packets, so
+         the service would install and then fail every start. Installed keeps
+         repair and uninstall working on a machine where Npcap was removed. -->
+    <Launch Condition="Installed OR NPCAPREGISTERED OR NPCAPDLL OR SKIPNPCAPCHECK"
+            Message="gecit needs Npcap, which cannot be bundled because its license forbids redistribution. Install it from https://npcap.com and run this installer again. To install anyway, pass SKIPNPCAPCHECK=1." />
+
+    <!-- ===================================================================
+         Payload
+         =================================================================== -->
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="gecit" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="DATAFOLDER" Name="gecit" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+
+      <Component Id="ServiceExe" Guid="791A36DA-FD30-450E-B982-045C84D8DA6C" Bitness="always64">
+        <File Id="gecitExe" Name="gecit.exe" Source="$(var.BinaryPath)" KeyPath="yes" />
+
+        <!-- MSI takes a service's image path from its component's key file, so
+             ServiceInstall has to live with gecit.exe. That is why the start
+             type is fixed here and the manual case is a custom action. -->
+        <ServiceInstall Id="GecitService"
+                        Name="$(var.ServiceName)"
+                        DisplayName="$(var.ServiceDisplayName)"
+                        Description="$(var.ServiceDescription)"
+                        Arguments="run"
+                        Type="ownProcess"
+                        Start="auto"
+                        ErrorControl="normal"
+                        Vital="yes" />
+
+        <ServiceControl Id="GecitServiceStopRemove"
+                        Name="$(var.ServiceName)"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+
+        <Environment Id="AddToPath" Name="PATH" Value="[INSTALLFOLDER]"
+                     Action="set" Part="last" System="yes" />
+      </Component>
+
+      <Component Id="Settings" Guid="85F884A9-E0E7-43DD-B6EA-0490607B4CD9" Bitness="always64">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\gecit" Name="AutoStart"
+                       Type="string" Value="[AUTOSTART]" KeyPath="yes" />
+      </Component>
+
+      <!-- Starting the service is its own component so that leaving the box
+           unchecked never starts it, not even briefly. A service that starts
+           and stops during install would take the machine's DNS and hand it
+           back, for no reason. -->
+      <Component Id="AutoStartControl" Guid="F8228893-1419-4025-9A25-239461B0A1A2"
+                 Bitness="always64" Condition="AUTOSTART = &quot;1&quot;">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\gecit" Name="AutoStartApplied"
+                       Type="integer" Value="1" KeyPath="yes" />
+        <ServiceControl Id="GecitServiceStart"
+                        Name="$(var.ServiceName)"
+                        Start="install"
+                        Wait="yes" />
+      </Component>
+
+      <!-- The config and the log live here, and the service reads the config
+           as LocalSystem. ProgramData's default ACL lets any user create a
+           subdirectory and own what they create, so an unprivileged user
+           could otherwise hand the service its settings. P drops that
+           inheritance; the ACL is reapplied even if the directory already
+           exists. -->
+      <Component Id="DataFolder" Guid="6690CB0E-1EF1-4A6E-9609-2004FC753E4F"
+                 Directory="DATAFOLDER" Bitness="always64">
+        <CreateFolder>
+          <PermissionEx Sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)" />
+        </CreateFolder>
+      </Component>
+
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="gecit" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+    </Feature>
+
+    <!-- ===================================================================
+         Custom actions. gecit's own CLI does the work, so the installer needs
+         no custom action DLL.
+         =================================================================== -->
+
+    <CustomAction Id="ConfigInit" Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[INSTALLFOLDER]gecit.exe&quot; config init --doh-upstream &quot;[DOHUPSTREAM]&quot; --fake-ttl &quot;[FAKETTL]&quot;"
+                  Execute="deferred" Impersonate="no" Return="check" />
+
+    <!-- The restart policy needs the failure-actions flag as well as the
+         actions themselves, and MSI cannot set that flag: the core
+         ServiceConfig element is documented as not working as expected, and
+         the Util extension's has no attribute for it. gecit sets both, so the
+         installed service and a hand-installed one get the same policy. -->
+    <CustomAction Id="SetRecovery" Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[INSTALLFOLDER]gecit.exe&quot; service set-recovery"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <!-- ServiceInstall can say auto but not delayed, and the engine needs a
+         usable NIC, so an ordinary auto-start races the network stack at boot.
+         A missed delay costs one failed start that the recovery policy
+         retries, so this never fails an install. -->
+    <CustomAction Id="SetStartAuto" Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[INSTALLFOLDER]gecit.exe&quot; service set-start"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <CustomAction Id="SetStartManual" Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[INSTALLFOLDER]gecit.exe&quot; service set-start --manual"
+                  Execute="deferred" Impersonate="no" Return="check" />
+
+    <!-- gecit points system DNS at itself while running. Uninstalling without
+         restoring it would leave the machine with no resolver. -->
+    <CustomAction Id="RestoreSystemState" Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[INSTALLFOLDER]gecit.exe&quot; cleanup"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <InstallExecuteSequence>
+      <!-- The config file is written by gecit, not installed as a component,
+           so a major upgrade cannot delete or overwrite the user's edits.
+           Fresh installs only, for the same reason. -->
+      <Custom Action="ConfigInit" After="InstallFiles"
+              Condition="NOT Installed AND NOT PATCH" />
+
+      <Custom Action="SetRecovery" After="InstallServices"
+              Condition="NOT Installed AND NOT PATCH" />
+
+      <Custom Action="SetStartAuto" After="StartServices"
+              Condition="AUTOSTART = &quot;1&quot; AND NOT Installed AND NOT PATCH" />
+
+      <Custom Action="SetStartManual" After="StartServices"
+              Condition="AUTOSTART &lt;&gt; &quot;1&quot; AND NOT Installed AND NOT PATCH" />
+
+      <Custom Action="RestoreSystemState" After="DeleteServices"
+              Condition="REMOVE=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+
+    <!-- ===================================================================
+         UI
+         =================================================================== -->
+
+    <WixVariable Id="WixUILicenseRtf" Value="Assets\LICENSE.rtf" />
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <ui:WixUI Id="WixUI_InstallDir" />
+
+    <UI>
+      <Dialog Id="GecitOptionsDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44"
+                 TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes"
+                 Text="{\WixUI_Font_Title}gecit options" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15" Transparent="yes" NoPrefix="yes"
+                 Text="Everything here can be changed later." />
+
+        <!-- Every text control needs room for the lines its string actually
+             wraps to, and the next control has to start below that. A label
+             sized for one line truncates, and an edit placed inside a label's
+             box covers it. -->
+        <Control Id="AutoStartCheckBox" Type="CheckBox" X="20" Y="60" Width="330" Height="17"
+                 Property="AUTOSTART" CheckBoxValue="1"
+                 Text="Start gecit automatically at boot" />
+        <Control Id="AutoStartNote" Type="Text" X="34" Y="79" Width="316" Height="22"
+                 Text="Leave this off to install the service without starting it. Start it later with: gecit service start" />
+
+        <Control Id="UpstreamLabel" Type="Text" X="20" Y="110" Width="330" Height="22"
+                 Text="DoH upstream: a preset (cloudflare, google, quad9, nextdns, adguard) or an https:// URL" />
+        <Control Id="UpstreamEdit" Type="Edit" X="20" Y="136" Width="330" Height="18"
+                 Property="DOHUPSTREAM" />
+
+        <Control Id="TtlLabel" Type="Text" X="20" Y="164" Width="330" Height="22"
+                 Text="Fake packet TTL: high enough to reach the DPI middlebox, low enough to never reach the server" />
+        <Control Id="TtlEdit" Type="Edit" X="20" Y="190" Width="60" Height="18"
+                 Property="FAKETTL" Integer="yes" />
+
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17"
+                 Text="!(loc.WixUIBack)" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes"
+                 Text="!(loc.WixUINext)">
+          <Publish Property="AUTOSTART" Value="0" Condition="NOT AUTOSTART" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes"
+                 Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+
+      <!-- Spliced between the license and the install directory. Order 2 sits
+           above WixUI's own publishes so this target wins, and the Back on
+           InstallDirDlg has to mirror it or the flow strands the new page. -->
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog"
+               Value="GecitOptionsDlg" Order="2" Condition="LicenseAccepted = &quot;1&quot;" />
+      <Publish Dialog="GecitOptionsDlg" Control="Back" Event="NewDialog"
+               Value="LicenseAgreementDlg" />
+      <Publish Dialog="GecitOptionsDlg" Control="Next" Event="NewDialog"
+               Value="InstallDirDlg" />
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog"
+               Value="GecitOptionsDlg" Order="2" />
+    </UI>
+
+  </Package>
+</Wix>

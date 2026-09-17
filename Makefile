@@ -1,7 +1,7 @@
 DARWIN_ARM64_CC ?= clang -arch arm64
 DARWIN_AMD64_CC ?= clang -arch x86_64
 
-.PHONY: all clean gecit-linux-amd64 gecit-linux-arm64 gecit-darwin-arm64 gecit-darwin-amd64 gecit-windows-amd64 \
+.PHONY: all clean vet lint fmt gecit-linux-amd64 gecit-linux-arm64 gecit-darwin-arm64 gecit-darwin-amd64 gecit-windows-amd64 \
         bpf-all bpf-clean bpf-translate bpf-compile install-gobee
 
 all: gecit-linux-amd64 gecit-linux-arm64
@@ -46,15 +46,15 @@ gecit-darwin-amd64:
 		CGO_LDFLAGS="-mmacosx-version-min=11.0" \
 		go build -tags with_gvisor -o bin/gecit-darwin-amd64 ./cmd/gecit
 
+# No cgo and no Npcap SDK. gopacket's Windows implementation has no cgo in it
+# and resolves wpcap.dll at runtime, so linking against the SDK buys nothing
+# and CGO_ENABLED=1 needs a toolchain that a cross-compile does not have.
+# Npcap is still required on the machine that runs gecit.
 gecit-windows-amd64:
-	@if [ -z "$(NPCAP_SDK)" ]; then \
-		echo "NPCAP_SDK must point to the Npcap SDK directory for Windows CGO builds"; \
-		exit 1; \
-	fi
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=1 \
-		CGO_CFLAGS="-I$(NPCAP_SDK)/Include" \
-		CGO_LDFLAGS="-L$(NPCAP_SDK)/Lib/x64 -lwpcap" \
-		go build -tags with_gvisor -o bin/gecit-windows-amd64.exe ./cmd/gecit
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -tags with_gvisor -o bin/gecit-windows-amd64.exe ./cmd/gecit
+
+vet:
+	go vet -tags with_gvisor ./...
 
 lint:
 	golangci-lint run ./...

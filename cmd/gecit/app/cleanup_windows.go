@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -34,7 +35,7 @@ func platformCleanup() bool {
 		}
 
 		fmt.Printf("restoring DNS for %s...\n", iface)
-		if prev == "" || prev == "dhcp" {
+		if prev == "" || prev == "dhcp" || net.ParseIP(prev) == nil {
 			exec.Command("netsh", "interface", "ip", "set", "dns", iface, "dhcp").CombinedOutput()
 		} else {
 			exec.Command("netsh", "interface", "ip", "set", "dns", iface, "static", prev).CombinedOutput()

@@ -25,7 +25,7 @@ func SetSystemDNS(_ ...string) error {
 			prev := strings.TrimSpace(lines[0])
 			prevIface := strings.TrimSpace(lines[1])
 			if prev != "" && prev != "127.0.0.1" && prevIface != "" {
-				if prev == "dhcp" {
+				if prev == "dhcp" || net.ParseIP(prev) == nil {
 					exec.Command("netsh", "interface", "ip", "set", "dns", prevIface, "dhcp").CombinedOutput()
 				} else {
 					exec.Command("netsh", "interface", "ip", "set", "dns", prevIface, "static", prev).CombinedOutput()
@@ -69,7 +69,9 @@ func RestoreSystemDNS(_ ...string) error {
 		iface = strings.TrimSpace(lines[1])
 	}
 
-	if prev == "" || prev == "dhcp" {
+	// A breadcrumb that does not hold an IP is a corrupt one, and its contents
+	// become netsh arguments. DHCP is the safe reading.
+	if prev == "" || prev == "dhcp" || net.ParseIP(prev) == nil {
 		exec.Command("netsh", "interface", "ip", "set", "dns", iface, "dhcp").CombinedOutput()
 	} else {
 		exec.Command("netsh", "interface", "ip", "set", "dns", iface, "static", prev).CombinedOutput()

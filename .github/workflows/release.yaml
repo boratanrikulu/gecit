@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-bpf:
@@ -62,8 +62,8 @@ jobs:
             tags: with_gvisor
           - os: windows
             arch: amd64
-            runner: windows-latest
-            cgo: 1
+            runner: ubuntu-latest
+            cgo: 0
             tags: with_gvisor
 
     steps:
@@ -82,16 +82,6 @@ jobs:
       - name: Install libpcap (macOS)
         if: matrix.os == 'darwin'
         run: brew install libpcap || true
-
-      - name: Install Npcap SDK and MinGW (Windows)
-        if: matrix.os == 'windows'
-        shell: pwsh
-        run: |
-          Invoke-WebRequest -Uri "https://npcap.com/dist/npcap-sdk-1.13.zip" -OutFile npcap-sdk.zip
-          Expand-Archive npcap-sdk.zip -DestinationPath npcap-sdk
-          choco install mingw -y
-          echo "CGO_CFLAGS=-I${{ github.workspace }}\npcap-sdk\Include" >> $env:GITHUB_ENV
-          echo "CGO_LDFLAGS=-L${{ github.workspace }}\npcap-sdk\Lib\x64 -lwpcap" >> $env:GITHUB_ENV
 
       - name: Build
         env:
@@ -112,10 +102,101 @@ jobs:
           name: gecit-${{ matrix.os }}-${{ matrix.arch }}
           path: gecit-${{ matrix.os }}-${{ matrix.arch }}*
 
+  msi:
+    name: Build MSI
+    runs-on: windows-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Windows binary
+        uses: actions/download-artifact@v4
+        with:
+          name: gecit-windows-amd64
+
+      # MSI versions are numeric, so the tag maps rather than passes through.
+      # A candidate becomes a fourth field, v0.2.0-rc.1 -> 0.2.0.1. MSI compares
+      # only the first three, so the candidate and its release are the same
+      # version to the installer and AllowSameVersionUpgrades is what lets the
+      # release install over it. The filename keeps the tag, which is easier to
+      # recognise than the numeric form.
+      #
+      # The dot in -rc.N is required, not decorative. It makes the number a
+      # numeric identifier under SemVer, so rc.10 sorts after rc.2. Written
+      # rc10 it is one alphanumeric identifier compared as text, and rc10 would
+      # sort before rc2 for anyone running `go install`.
+      - name: Resolve MSI version
+        id: version
+        shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          $tag = $env:TAG
+          if ($tag -match '^v(\d+\.\d+\.\d+)(?:-rc\.(\d+))?$') {
+            $version = $Matches[1]
+            $rc = if ($Matches[2]) { [int]$Matches[2] } else { 0 }
+            if ($Matches[2] -and ($rc -lt 1 -or $rc -gt 65535)) {
+              # Skip rather than fail: the release job needs this one, and a
+              # mistyped tag should still publish its binaries.
+              Write-Host "candidate number must be 1-65535, got $rc, skipping the MSI"
+              "version=" >> $env:GITHUB_OUTPUT
+              "label=" >> $env:GITHUB_OUTPUT
+              exit 0
+            }
+            if ($rc -gt 0) { $version = "$version.$rc" }
+            "version=$version" >> $env:GITHUB_OUTPUT
+            "label=$($tag -replace '^v','')" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "$tag is not vX.Y.Z or vX.Y.Z-rc.N, skipping the MSI"
+            "version=" >> $env:GITHUB_OUTPUT
+            "label=" >> $env:GITHUB_OUTPUT
+          }
+
+      - uses: actions/setup-dotnet@v4
+        if: steps.version.outputs.version != ''
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install WiX
+        if: steps.version.outputs.version != ''
+        run: |
+          dotnet tool install --global wix --version 6.0.1
+          wix extension add -g WixToolset.UI.wixext/6.0.1
+
+      - name: Build MSI
+        if: steps.version.outputs.version != ''
+        shell: pwsh
+        run: |
+          ./packaging/windows/build.ps1 `
+            -Version "${{ steps.version.outputs.version }}" `
+            -Label "${{ steps.version.outputs.label }}" `
+            -BinaryPath ./gecit-windows-amd64.exe
+          Move-Item packaging/windows/*.msi .
+
+      - name: Upload MSI
+        if: steps.version.outputs.version != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: gecit-windows-amd64-msi
+          path: '*.msi'
+          if-no-files-found: error
+
+      # The .wixpdb is what makes a failed install diagnosable later.
+      - name: Upload build symbols
+        if: always() && steps.version.outputs.version != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: msi-wixpdb
+          path: packaging/windows/*.wixpdb
+          if-no-files-found: ignore
+          retention-days: 7
+
   release:
     name: Create release
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, msi]
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -147,4 +228,5 @@ jobs:
             release/gecit-darwin-amd64
             release/gecit-darwin-arm64
             release/gecit-windows-amd64.exe
+            release/*.msi
             release/checksums.txt

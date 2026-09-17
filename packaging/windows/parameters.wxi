@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Include xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <?define ProductName = "gecit"?>
+  <?define Manufacturer = "Bora Tanrikulu"?>
+  <?define PackageDescription = "DPI bypass via fake TLS ClientHello injection and DoH DNS"?>
+
+  <!-- Set on the command line by build.ps1, from the release tag with the
+       leading v removed. MSI versions have to be numeric. -->
+  <?define ProductVersion = "$(var.Version)"?>
+
+  <!-- Regenerated every build so a major upgrade replaces the installed
+       product instead of refusing as an already-installed one. -->
+  <?define ProductCode = "*"?>
+
+  <!-- The permanent identity of gecit as a product. Changing it orphans every
+       installed copy: upgrades would install alongside the old one instead of
+       replacing it. Do not change. -->
+  <?define UpgradeCode = "F7DDCBBA-7CA6-4D78-8561-679F8CA54946"?>
+
+  <?define ServiceName = "gecit"?>
+  <?define ServiceDisplayName = "gecit DPI bypass"?>
+  <?define ServiceDescription = "Injects fake TLS ClientHello packets to desynchronize DPI middleboxes, and resolves DNS over HTTPS."?>
+
+</Include>

@@ -1,13 +1,9 @@
 package app
 
 import (
-	"context"
-	"os"
-	"os/signal"
-	"syscall"
+	"fmt"
 
 	"github.com/boratanrikulu/gecit/pkg/engine"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -41,26 +37,18 @@ func init() {
 }
 
 func runEngine(cmd *cobra.Command, args []string) error {
+	if err := loadConfig(); err != nil {
+		return err
+	}
 	if err := checkPrivileges(); err != nil {
 		return err
 	}
 
-	logger := logrus.New()
-	logger.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
-	if viper.GetBool("verbose") {
-		logger.SetLevel(logrus.DebugLevel)
-	}
+	logger := newLogger(viper.GetBool("verbose"))
 
-	cfg := engine.Config{
-		MSS:               viper.GetInt("mss"),
-		RestoreMSS:        viper.GetInt("restore_mss"),
-		RestoreAfterBytes: viper.GetInt("restore_after_bytes"),
-		Ports:             toUint16Slice(viper.GetIntSlice("ports")),
-		Interface:         viper.GetString("interface"),
-		CgroupPath:        viper.GetString("cgroup_path"),
-		FakeTTL:           viper.GetInt("fake_ttl"),
-		DoHEnabled:        viper.GetBool("doh_enabled"),
-		DoHUpstream:       viper.GetString("doh_upstream"),
+	cfg, err := engineConfigFromViper(viper.GetViper())
+	if err != nil {
+		return err
 	}
 
 	eng, err := newPlatformEngine(cfg, logger)
@@ -68,27 +56,42 @@ func runEngine(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	if err := eng.Start(ctx); err != nil {
-		return err
-	}
-
-	logger.WithField("mode", eng.Mode()).Info("gecit is running — press Ctrl+C to stop")
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	<-sigCh
-
-	logger.Info("shutting down...")
-	return eng.Stop()
+	return supervise(eng, logger)
 }
 
-func toUint16Slice(ints []int) []uint16 {
+func engineConfigFromViper(v *viper.Viper) (engine.Config, error) {
+	ports, err := toPorts(v.GetIntSlice("ports"))
+	if err != nil {
+		return engine.Config{}, err
+	}
+
+	cfg := engine.Config{
+		MSS:               v.GetInt("mss"),
+		RestoreMSS:        v.GetInt("restore_mss"),
+		RestoreAfterBytes: v.GetInt("restore_after_bytes"),
+		Ports:             ports,
+		Interface:         v.GetString("interface"),
+		CgroupPath:        v.GetString("cgroup_path"),
+		FakeTTL:           v.GetInt("fake_ttl"),
+		DoHEnabled:        v.GetBool("doh_enabled"),
+		DoHUpstream:       v.GetString("doh_upstream"),
+	}
+
+	if err := validateConfig(cfg); err != nil {
+		return engine.Config{}, err
+	}
+	return cfg, nil
+}
+
+// A port outside the uint16 range would otherwise wrap into a valid-looking
+// one: 70000 becomes 4464.
+func toPorts(ints []int) ([]uint16, error) {
 	out := make([]uint16, len(ints))
 	for i, v := range ints {
+		if v < 1 || v > 65535 {
+			return nil, fmt.Errorf("ports must be 1-65535, got %d", v)
+		}
 		out[i] = uint16(v)
 	}
-	return out
+	return out, nil
 }

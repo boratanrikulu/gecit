@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 env:
   BPFVET_VERSION: "v0.2.1"
   BPFVET_SHA256: "79387d694285b762361c6385670544de3f04a329cdd3cd6b2cf41e339f979b56"
@@ -31,6 +34,49 @@ jobs:
 
       - name: Run unit tests
         run: go test -race -timeout 60s ./...
+
+  windows:
+    name: Windows build and MSI
+    runs-on: windows-latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      # No `make bpf-all` here on purpose. gobee generates
+      # pkg/ebpf/bpf/sockops_bindings.go without a build constraint, and it
+      # imports golang.org/x/sys/unix, so its presence breaks any GOOS=windows
+      # command that walks ./... The binary never imports that package on
+      # Windows.
+      - name: Vet
+        run: go vet -tags with_gvisor ./...
+
+      - name: Build
+        run: go build -tags with_gvisor -o gecit.exe ./cmd/gecit
+
+      - name: Test
+        run: go test -tags with_gvisor -timeout 60s ./cmd/... ./pkg/dns/... ./pkg/fake/...
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Extensions are pinned to the tool version. An unpinned
+      # `wix extension add` resolves a newer extension and fails to link.
+      - name: Install WiX
+        run: |
+          dotnet tool install --global wix --version 6.0.1
+          wix extension add -g WixToolset.UI.wixext/6.0.1
+
+      # Validates the installer authoring on every change, rather than finding
+      # out at tag time. The version is a placeholder.
+      - name: Build MSI
+        shell: pwsh
+        run: ./packaging/windows/build.ps1 -Version 0.0.0 -BinaryPath ./gecit.exe
 
   bpfvet:
     name: BPF compatibility check
