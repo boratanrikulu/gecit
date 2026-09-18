@@ -103,7 +103,9 @@ jobs:
           if [ "${{ matrix.os }}" = "windows" ]; then EXT=".exe"; fi
           TAGS=""
           if [ -n "${{ matrix.tags }}" ]; then TAGS="-tags ${{ matrix.tags }}"; fi
-          go build -ldflags="-s -w" $TAGS -o gecit-${{ matrix.os }}-${{ matrix.arch }}${EXT} ./cmd/gecit
+          VERSION=${GITHUB_REF_NAME#v}
+          STAMP=github.com/boratanrikulu/gecit/cmd/gecit/app.version=$VERSION
+          go build -ldflags="-s -w -X $STAMP" $TAGS -o gecit-${{ matrix.os }}-${{ matrix.arch }}${EXT} ./cmd/gecit
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
@@ -200,10 +202,63 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  packages:
+    name: Build packages
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      # For `go install nfpm`. Nothing here compiles gecit: the binaries come
+      # from the matrix, which is the only place that can build darwin with cgo.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Stage binaries
+        run: |
+          mkdir -p bin
+          for os in linux darwin; do
+            for arch in amd64 arm64; do
+              cp "artifacts/gecit-$os-$arch/gecit-$os-$arch" "bin/gecit-$os-$arch"
+            done
+          done
+          chmod +x bin/*
+
+      # dpkg rejects a version that does not start with a digit and rpm rejects
+      # one containing a hyphen, so a mistyped tag would otherwise publish
+      # packages nobody can install. The MSI job guards its own version the same
+      # way. Failing here is deliberate: `release` needs this job, and a broken
+      # asset is worse than a missing one.
+      - name: Check the tag shape
+        run: |
+          if ! echo "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'; then
+            echo "$GITHUB_REF_NAME is not vX.Y.Z or vX.Y.Z-rc.N"
+            exit 1
+          fi
+
+      - name: Build Linux packages and macOS tarballs
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          make packages-linux VERSION="$VERSION"
+          make tarball-darwin VERSION="$VERSION"
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: gecit-packages
+          path: dist/*
+          if-no-files-found: error
+
   release:
     name: Create release
     runs-on: ubuntu-latest
-    needs: [build, msi]
+    needs: [build, msi, packages]
     permissions:
       contents: write
     steps:
@@ -214,29 +269,74 @@ jobs:
         with:
           path: artifacts/
 
+      # Only artifacts/gecit-*/ on purpose. bpf-objects/ holds two files both
+      # named sockops.bpf.o, and msi-wixpdb/ is a debugging aid, not an asset.
       - name: Prepare release assets
         run: |
           mkdir -p release/
           for dir in artifacts/gecit-*/; do
             for file in "$dir"*; do
               [ -f "$file" ] || continue
-              name=$(basename "$file")
-              cp "$file" "release/$name"
-              chmod +x "release/$name"
+              cp "$file" "release/$(basename "$file")"
             done
           done
-          cd release && sha256sum gecit-* > checksums.txt
+          chmod +x release/gecit-linux-amd64 release/gecit-linux-arm64 \
+                   release/gecit-darwin-amd64 release/gecit-darwin-arm64
+          (cd release && sha256sum -- *) > "$RUNNER_TEMP/checksums.txt"
+          cp "$RUNNER_TEMP/checksums.txt" release/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
+          # Without this a glob that matches nothing is silent, and the tap job
+          # would publish a cask whose download URL 404s.
+          fail_on_unmatched_files: true
           files: |
             release/gecit-linux-amd64
             release/gecit-linux-arm64
             release/gecit-darwin-amd64
             release/gecit-darwin-arm64
             release/gecit-windows-amd64.exe
+            release/gecit_*_linux_*.deb
+            release/gecit_*_linux_*.rpm
+            release/gecit_*_linux_*.apk
+            release/gecit_*_darwin_*.tar.gz
             release/*.msi
             release/checksums.txt
+
+  tap:
+    name: Publish Homebrew cask
+    runs-on: ubuntu-latest
+    needs: release
+    # HOMEBREW_TAP_GITHUB_TOKEN is an environment secret. A job without this
+    # line reads it as an empty string and the push to the tap fails.
+    environment: release
+    steps:
+      # The workspace token has no business sitting next to a cross-repo write
+      # token; publish.sh brings its own credentials.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          name: gecit-packages
+          path: dist/
+
+      # A candidate publishes its assets and stops there. Pushing the cask
+      # would hand everyone running `brew install` an rc.
+      - name: Publish cask
+        env:
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        run: |
+          if ! echo "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "$GITHUB_REF_NAME is not a stable release, leaving the tap alone"
+            exit 0
+          fi
+          VERSION=${GITHUB_REF_NAME#v}
+          packaging/homebrew/publish.sh "$VERSION" \
+            "dist/gecit_${VERSION}_darwin_amd64.tar.gz" \
+            "dist/gecit_${VERSION}_darwin_arm64.tar.gz"

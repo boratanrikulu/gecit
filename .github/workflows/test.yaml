@@ -81,6 +81,83 @@ jobs:
         shell: pwsh
         run: ./packaging/windows/build.ps1 -Version 0.0.0 -BinaryPath ./gecit.exe
 
+  packages:
+    name: Linux packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Install BPF toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm llvm-dev libbpf-dev
+
+      - name: Build BPF objects via gobee
+        run: make bpf-all
+
+      - name: Build Linux binaries
+        run: make gecit-linux-amd64 gecit-linux-arm64 VERSION=0.0.0
+
+      # Builds the packaging on every change, rather than finding out at tag
+      # time. The version is a placeholder.
+      - name: Build packages
+        run: make packages-linux VERSION=0.0.0
+
+      - name: Show deb contents
+        run: |
+          dpkg-deb -I dist/gecit_0.0.0_linux_amd64.deb
+          dpkg-deb -c dist/gecit_0.0.0_linux_amd64.deb
+          test "$(dpkg-deb -f dist/gecit_0.0.0_linux_arm64.deb Architecture)" = arm64
+
+      # The maintainer scripts are the part with nothing to type-check them, so
+      # run them for real. The runner has systemd.
+      - name: Install the deb
+        run: |
+          sudo dpkg -i dist/gecit_0.0.0_linux_amd64.deb
+          test "$(gecit version | cut -d' ' -f2)" = 0.0.0
+          test -f /etc/gecit/config.yaml
+          systemctl cat gecit.service
+          test "$(systemctl is-enabled gecit.service)" = disabled
+
+      # gecit takes over DNS when it starts, so this enables the unit without
+      # starting it. That is still enough to catch the failure that matters: a
+      # reinstall must not pick up a stale enable symlink and start at boot.
+      - name: Upgrade with the unit enabled
+        run: |
+          sudo systemctl enable gecit.service
+          sudo dpkg -i dist/gecit_0.0.0_linux_amd64.deb
+          test "$(systemctl is-enabled gecit.service)" = enabled
+
+      - name: Remove the deb
+        run: |
+          sudo dpkg -r gecit
+          test ! -e /usr/bin/gecit
+          test ! -e /usr/lib/systemd/system/gecit.service
+          test ! -e /etc/systemd/system/multi-user.target.wants/gecit.service
+          sudo dpkg -i dist/gecit_0.0.0_linux_amd64.deb
+          test "$(systemctl is-enabled gecit.service)" = disabled
+          sudo dpkg -r gecit
+
+      # Catches a placeholder renamed in the template but not in render.sh, and
+      # a tarball that never arrived. Rendered to a file rather than piped: the
+      # default shell here is `bash -e` with no pipefail, so a failing render.sh
+      # on the left of a pipe would go unnoticed.
+      - name: Render the Homebrew cask
+        run: |
+          mkdir -p dist
+          echo amd64 > dist/darwin_amd64.tar.gz
+          echo arm64 > dist/darwin_arm64.tar.gz
+          packaging/homebrew/render.sh 0.0.0 \
+            dist/darwin_amd64.tar.gz dist/darwin_arm64.tar.gz > /tmp/gecit.rb
+          cat /tmp/gecit.rb
+          ! grep -q '@@' /tmp/gecit.rb
+          grep -q "$(sha256sum dist/darwin_arm64.tar.gz | cut -d' ' -f1)" /tmp/gecit.rb
+          ! packaging/homebrew/render.sh 0.0.0 dist/darwin_amd64.tar.gz /nope.tar.gz
+
   bpfvet:
     name: BPF compatibility check
     runs-on: ubuntu-latest
