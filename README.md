@@ -51,6 +51,43 @@ Additionally, some ISPs poison DNS responses. gecit includes a built-in DoH (DNS
 
 ## Installation
 
+### Package managers
+
+```bash
+# macOS
+brew install boratanrikulu/tap/gecit
+```
+
+Grab the matching package for your distro from
+[releases](https://github.com/boratanrikulu/gecit/releases), then:
+
+```bash
+# Debian, Ubuntu
+sudo dpkg -i gecit_*_linux_amd64.deb
+
+# Fedora, RHEL
+sudo rpm -i gecit_*_linux_amd64.rpm
+
+# Alpine
+sudo apk add --allow-untrusted gecit_*_linux_amd64.apk
+```
+
+amd64 and arm64 are both published. The deb and the rpm install `/usr/bin/gecit`
+and a systemd unit, and leave the unit disabled. Installing a DPI bypass should
+not repoint your resolver on its own, and a package manager has no way to ask:
+
+```bash
+sudo systemctl enable --now gecit
+sudo systemctl status gecit
+sudo systemctl stop gecit     # restores DNS
+```
+
+Removing the package stops the service first, which is what puts your original
+nameservers back. `/etc/gecit/config.yaml` is left in place.
+
+Alpine has no systemd, so the apk is the binary and nothing else. Run
+`sudo gecit run` yourself, or write an OpenRC service for it.
+
 ### Pre-built binaries
 
 Download from [releases](https://github.com/boratanrikulu/gecit/releases):
@@ -154,6 +191,9 @@ sudo gecit status
 
 # Restore system settings after a crash
 sudo gecit cleanup
+
+# Which build is this
+gecit version
 ```
 
 ### Windows service
@@ -367,6 +407,7 @@ Most Windows DPI bypass tools use WinDivert, but its code signing certificate ex
 - [x] DoH DNS resolver
 - [x] Windows - TUN transparent proxy
 - [x] Local web panel
+- [x] Packages - deb, rpm, apk, Homebrew tap, MSI
 - [ ] Auto-TTL detection (traceroute to find DPI hop count)
 - [ ] ECH (Encrypted Client Hello) support
 

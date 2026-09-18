@@ -48,6 +48,10 @@ make gecit-windows-amd64
 make vet                     # go vet -tags with_gvisor ./...
 make fmt
 go test -race -tags with_gvisor -timeout 60s ./...
+
+make packages-linux VERSION=0.2.0   # deb, rpm, apk from bin/ into dist/
+make tarball-darwin VERSION=0.2.0   # the archives the Homebrew cask downloads
+make cask VERSION=0.2.0             # prints the rendered cask
 ```
 
 Without `-tags with_gvisor` the suite fails to build on macOS and Windows:
@@ -108,6 +112,75 @@ in this repo.
   via `netsh` and leaves a breadcrumb at `%ProgramData%\gecit-dns-backup`
   (`pkg/dns/system_windows.go:12`). A hard kill leaves the machine without
   working DNS until `gecit cleanup` runs.
+
+## Packaging facts
+
+Five release paths: raw binaries, an MSI, deb/rpm/apk, macOS tarballs, and a
+Homebrew cask. Verified, and each one changes a decision.
+
+- **No goreleaser, and it is not an oversight.** kovan does all of this with one
+  `.goreleaser.yml` because it is pure Go. gecit's darwin build needs
+  `CGO_ENABLED=1` against the system libpcap, so it needs a mac runner, and
+  goreleaser OSS is one job. `--split`/`continue` and `builds[].builder:
+  prebuilt`, the two features that would fix it, are both Pro. The matrix in
+  `release.yaml` builds; `nfpm` and `packaging/homebrew/` package what it built.
+
+- `packages-linux` and `tarball-darwin` read `bin/` and never compile. The
+  release packaging job downloads the matrix artifacts and has no BPF toolchain.
+
+- **nfpm ignores `${BINARY}` in `contents[].src` unless the entry sets
+  `expand: true`.** Without it the field goes to the globber and the build fails
+  on a literal `${BINARY}`. `nfpm.go:197` skips any entry with `!f.Expand`; that
+  path is in `$(go env GOMODCACHE)`, not in this repo.
+
+- The five raw binary asset names (`gecit-linux-amd64` and friends) are load
+  bearing. Both READMEs link `releases/latest/download/<name>`, so packaging
+  adds assets next to them and never renames one.
+
+- **The tap holds a cask, not a formula.** `boratanrikulu/homebrew-tap` keeps
+  `Casks/`, shared with kovan. A cask is macOS-only by Homebrew's rules, which
+  is why Linux gets distro packages rather than a formula.
+
+- Homebrew applies `com.apple.quarantine` to the staged binary, confirmed by
+  installing the cask locally: replace the strip step with anything else and the
+  attribute is there. gecit has no code-signing certificate, so without the
+  `postflight_steps` xattr call the binary will not run. Use `postflight_steps`,
+  not `postflight`: Homebrew 7's `Cask/InstallSteps` cop rejects the old form,
+  and `brew style --cask` is the check.
+
+- **`environment: release` on the tap job is load bearing.**
+  `HOMEBREW_TAP_GITHUB_TOKEN` is an environment secret and is per repository, so
+  kovan's copy does not carry over. A job without the line reads it as an empty
+  string and the push fails.
+
+- The tap is only updated for a `vX.Y.Z` tag. A candidate publishes its assets
+  and leaves the cask alone, otherwise `brew install` hands people an rc.
+
+- The deb/rpm/apk install a systemd unit and leave it disabled. `apt install`
+  has no way to ask, and enabling it would repoint the machine's resolver at
+  127.0.0.1 unprompted. `preremove.sh` stops the service, which is the only
+  thing that restores DNS: `platformCleanup()` on Linux is a stub that returns
+  false, so `gecit cleanup` does nothing there. It also disables the unit,
+  because the enable symlink under `/etc/systemd/system` belongs to systemd
+  rather than the package and would otherwise survive removal and start gecit
+  at boot after a reinstall.
+
+- **rpm needs its own preremove and that is why there are two.** rpm runs
+  `%post`(new) before `%preun`(old) on an upgrade, the reverse of dpkg, so one
+  shared script would stop the service that `%post` just restarted. rpm passes a
+  count (`0` on erase) where dpkg passes a verb (`remove`, `upgrade`), and apk
+  passes a version string, which is why a single pattern cannot cover all three:
+  an apk removal at version `12.0.0` matches any glob written for rpm's integer.
+
+- **apk gets the binary and little else.** Alpine has no systemd, so the unit
+  file ships unused; scoping it out would mean a per-packager copy of every
+  content entry. nfpm writes only `.post-install`, `.pre-deinstall` and
+  `.post-deinstall` for apk (`apk/apk.go:350-355`), so an apk upgrade runs no
+  script at all unless `apk.scripts.postupgrade` is set, which it is not.
+
+- No packaged `/etc/gecit/config.yaml`. `postinstall.sh` runs `gecit config
+  init`, so the file comes from `renderConfig` and cannot drift from
+  `configKeys`.
 
 ## Conventions
 

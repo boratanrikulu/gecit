@@ -49,6 +49,44 @@ Bazı ISP'ler DNS yanıtlarını da zehirler. gecit, dahili DoH sunucusu ile DNS
 
 ## Kurulum
 
+### Paket yöneticileri
+
+```bash
+# macOS
+brew install boratanrikulu/tap/gecit
+```
+
+Dağıtımınıza uygun paketi
+[releases](https://github.com/boratanrikulu/gecit/releases) sayfasından indirin:
+
+```bash
+# Debian, Ubuntu
+sudo dpkg -i gecit_*_linux_amd64.deb
+
+# Fedora, RHEL
+sudo rpm -i gecit_*_linux_amd64.rpm
+
+# Alpine
+sudo apk add --allow-untrusted gecit_*_linux_amd64.apk
+```
+
+Paketler hem amd64 hem arm64 için var. deb ve rpm, `/usr/bin/gecit` ile
+birlikte bir systemd servisi kuruyor ama servisi etkinleştirmiyor. Kurulum
+sırasında DNS ayarlarınızın sessizce değişmesi doğru olmaz, paket yöneticisinin
+de size soracak bir yolu yok:
+
+```bash
+sudo systemctl enable --now gecit
+sudo systemctl status gecit
+sudo systemctl stop gecit     # DNS'i geri alır
+```
+
+Paketi kaldırırken önce servis durduruluyor, DNS ayarlarınız da böyle geri
+geliyor. `/etc/gecit/config.yaml` dosyasına dokunulmuyor.
+
+Alpine'da systemd yok, o yüzden apk paketinden sadece binary çıkıyor. `sudo
+gecit run` ile kendiniz çalıştırın, ya da OpenRC servisi yazın.
+
 ### Hazır binary'ler
 
 [Releases](https://github.com/boratanrikulu/gecit/releases) sayfasından indirin:
@@ -152,6 +190,9 @@ sudo gecit status
 
 # Çökme sonrası geri yükleme
 sudo gecit cleanup
+
+# Hangi sürüm
+gecit version
 ```
 
 ### Windows servisi
@@ -362,6 +403,7 @@ Windows'ta DPI bypass araçlarının çoğu WinDivert kullanır, ancak WinDivert
 - [x] DoH DNS sunucusu
 - [x] Windows - TUN şeffaf proxy
 - [x] Yerel web paneli
+- [x] Paketler - deb, rpm, apk, Homebrew tap, MSI
 - [ ] Otomatik TTL tespiti (DPI hop sayısını bulmak için traceroute)
 - [ ] ECH (Encrypted Client Hello) desteği
 
