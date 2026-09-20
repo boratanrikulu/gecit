@@ -11,10 +11,13 @@ import (
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Start the DPI bypass engine",
-	RunE:  runEngine,
 }
 
 func init() {
+	// Assigned here rather than in the literal above: runEngine reaches the
+	// flags on this command, and Go reads that as a cycle in the initializer.
+	runCmd.RunE = runEngine
+
 	runCmd.Flags().Int("fake-ttl", 8, "TTL for fake packets (reaches DPI, not server)")
 	runCmd.Flags().Bool("doh", true, "enable built-in DoH DNS resolver")
 	runCmd.Flags().String("doh-upstream", "cloudflare", "DoH upstream: preset (cloudflare,google,quad9,nextdns,adguard) or URL")
@@ -23,6 +26,8 @@ func init() {
 	runCmd.Flags().Int("restore-mss", 0, "restored MSS value, 0 = auto/1460 (Linux only)")
 	runCmd.Flags().String("cgroup", "/sys/fs/cgroup", "cgroup v2 path (Linux only)")
 	runCmd.Flags().BoolP("verbose", "v", false, "enable debug logging")
+	runCmd.Flags().Bool("panel", true, "serve the local web panel")
+	runCmd.Flags().String("panel-addr", "127.0.0.1:8088", "web panel address, loopback only")
 
 	viper.BindPFlag("verbose", runCmd.Flags().Lookup("verbose"))
 	viper.BindPFlag("fake_ttl", runCmd.Flags().Lookup("fake-ttl"))
@@ -32,6 +37,8 @@ func init() {
 	viper.BindPFlag("restore_after_bytes", runCmd.Flags().Lookup("restore-after-bytes"))
 	viper.BindPFlag("restore_mss", runCmd.Flags().Lookup("restore-mss"))
 	viper.BindPFlag("cgroup_path", runCmd.Flags().Lookup("cgroup"))
+	viper.BindPFlag("panel_enabled", runCmd.Flags().Lookup("panel"))
+	viper.BindPFlag("panel_addr", runCmd.Flags().Lookup("panel-addr"))
 
 	rootCmd.AddCommand(runCmd)
 }
@@ -51,12 +58,17 @@ func runEngine(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	eng, err := newPlatformEngine(cfg, logger)
+	r := newRunner(cfg, logger)
+
+	// The panel comes up first so its address is logged before the engine has a
+	// chance to fail, and so a failure has somewhere to be read.
+	srv, err := startPanel(r, cfg, logger)
 	if err != nil {
 		return err
 	}
+	defer stopPanel(srv, logger)
 
-	return supervise(eng, logger)
+	return supervise(r, logger)
 }
 
 func engineConfigFromViper(v *viper.Viper) (engine.Config, error) {
@@ -75,6 +87,9 @@ func engineConfigFromViper(v *viper.Viper) (engine.Config, error) {
 		FakeTTL:           v.GetInt("fake_ttl"),
 		DoHEnabled:        v.GetBool("doh_enabled"),
 		DoHUpstream:       v.GetString("doh_upstream"),
+		Verbose:           v.GetBool("verbose"),
+		PanelEnabled:      v.GetBool("panel_enabled"),
+		PanelAddr:         v.GetString("panel_addr"),
 	}
 
 	if err := validateConfig(cfg); err != nil {

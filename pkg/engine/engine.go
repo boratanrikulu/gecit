@@ -11,4 +11,6 @@ type Engine interface {
 	Stop() error
 	// Mode returns the bypass mechanism name (e.g., "ebpf-sockops", "tun").
 	Mode() string
+	// Stats returns the live counters.
+	Stats() Stats
 }

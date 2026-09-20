@@ -1,29 +1,24 @@
 package app
 
 import (
-	"context"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/boratanrikulu/gecit/pkg/engine"
 	"github.com/sirupsen/logrus"
 )
 
-func runInteractive(eng engine.Engine, logger *logrus.Logger) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	if err := eng.Start(ctx); err != nil {
+func runInteractive(r *runner, logger *logrus.Logger) error {
+	if err := r.Start(); err != nil {
 		return err
 	}
 
-	logger.WithField("mode", eng.Mode()).Info("gecit is running, press Ctrl+C to stop")
+	logger.WithField("mode", r.Mode()).Info("gecit is running, press Ctrl+C to stop")
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
 
 	logger.Info("shutting down...")
-	return eng.Stop()
+	return r.Stop()
 }

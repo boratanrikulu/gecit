@@ -1,17 +1,16 @@
 package app
 
 import (
-	"fmt"
 	"os"
+
+	"github.com/boratanrikulu/gecit/pkg/panel"
 )
 
-func printPlatformStatus() {
-	fmt.Printf("  engine:     tun\n")
+func platformFacts() []panel.Fact {
+	facts := []panel.Fact{{Name: "engine", Value: "tun"}}
 
 	if os.Geteuid() != 0 {
-		fmt.Printf("  (run with sudo for accurate capability detection)\n")
-		return
+		return append(facts, panel.Fact{Name: "note", Value: "run with sudo for accurate capability detection"})
 	}
-
-	fmt.Printf("  raw socket: available\n")
+	return append(facts, panel.Fact{Name: "raw socket", Value: "available"})
 }

@@ -58,8 +58,11 @@ jobs:
       - name: Build
         run: go build -tags with_gvisor -o gecit.exe ./cmd/gecit
 
+      # pkg/panel and pkg/seqtrack both carry Windows-only code: the panel
+      # token's DACL and the seq tracker's atomic swap. No -race, it needs cgo
+      # and this job builds without it.
       - name: Test
-        run: go test -tags with_gvisor -timeout 60s ./cmd/... ./pkg/dns/... ./pkg/fake/...
+        run: go test -tags with_gvisor -timeout 60s ./cmd/... ./pkg/dns/... ./pkg/fake/... ./pkg/panel/... ./pkg/seqtrack/...
 
       - uses: actions/setup-dotnet@v4
         with:

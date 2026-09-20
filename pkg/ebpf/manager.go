@@ -10,9 +10,11 @@ import (
 	"net"
 	"runtime"
 	"sync"
+	"sync/atomic"
 
 	gecitdns "github.com/boratanrikulu/gecit/pkg/dns"
 	gecitbpf "github.com/boratanrikulu/gecit/pkg/ebpf/bpf"
+	"github.com/boratanrikulu/gecit/pkg/engine"
 	"github.com/boratanrikulu/gecit/pkg/fake"
 	"github.com/boratanrikulu/gecit/pkg/rawsock"
 	"github.com/cilium/ebpf"
@@ -43,6 +45,18 @@ type Manager struct {
 	logger  *logrus.Logger
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
+
+	connections   atomic.Uint64
+	fakesInjected atomic.Uint64
+	injectErrors  atomic.Uint64
+}
+
+func (m *Manager) Stats() engine.Stats {
+	return engine.Stats{
+		Connections:   m.connections.Load(),
+		FakesInjected: m.fakesInjected.Load(),
+		InjectErrors:  m.injectErrors.Load(),
+	}
 }
 
 func NewManager(cfg Config, logger *logrus.Logger) *Manager {
@@ -171,6 +185,7 @@ func (m *Manager) readEvents(ctx context.Context) {
 		evt.Seq = binary.NativeEndian.Uint32(record.RawSample[12:16])
 		evt.Ack = binary.NativeEndian.Uint32(record.RawSample[16:20])
 
+		m.connections.Add(1)
 		m.injectFake(evt)
 	}
 }
@@ -186,9 +201,11 @@ func (m *Manager) injectFake(evt gecitbpf.ConnEvent) {
 	}
 
 	if err := m.rawSock.SendFake(conn, fake.TLSClientHello, m.cfg.FakeTTL); err != nil {
+		m.injectErrors.Add(1)
 		m.logger.WithError(err).Warn("failed to send fake packet")
 		return
 	}
+	m.fakesInjected.Add(1)
 
 	dst := fmt.Sprintf("%s:%d", conn.DstIP, conn.DstPort)
 	if dns := gecitdns.GetDNSServer(); dns != nil {
@@ -198,10 +215,11 @@ func (m *Manager) injectFake(evt gecitbpf.ConnEvent) {
 	}
 
 	m.logger.WithFields(logrus.Fields{
-		"dst": dst,
-		"seq": evt.Seq,
-		"ack": evt.Ack,
-		"ttl": m.cfg.FakeTTL,
+		"event": "inject",
+		"dst":   dst,
+		"seq":   evt.Seq,
+		"ack":   evt.Ack,
+		"ttl":   m.cfg.FakeTTL,
 	}).Info("fake ClientHello injected")
 }
 

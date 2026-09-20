@@ -113,3 +113,11 @@ func (e *ebpfEngine) Stop() error {
 }
 
 func (e *ebpfEngine) Mode() string { return "ebpf-sockops" }
+
+func (e *ebpfEngine) Stats() engine.Stats {
+	stats := e.mgr.Stats()
+	dns := e.dns.Stats()
+	stats.DNSQueries = dns.DNSQueries
+	stats.DNSErrors = dns.DNSErrors
+	return stats
+}

@@ -62,6 +62,7 @@ func (h *handler) NewConnectionEx(
 		return
 	}
 
+	h.mgr.connections.Add(1)
 	h.injectAndForward(conn, serverConn, dst)
 }
 
@@ -94,15 +95,24 @@ func (h *handler) injectAndForward(appConn, serverConn net.Conn, dst string) {
 		Seq: seq, Ack: ack,
 	}
 
+	// The real ClientHello goes out either way below: the connection has to
+	// work even when the bypass could not be applied.
+	sent := true
 	for i := 0; i < 3; i++ {
 		if err := h.mgr.rawSock.SendFake(connInfo, fake.TLSClientHello, h.mgr.cfg.FakeTTL); err != nil {
 			h.mgr.logger.WithError(err).Warn("SendFake failed")
+			sent = false
 			break
 		}
 	}
-	h.mgr.logger.WithFields(logrus.Fields{
-		"dst": dst, "seq": seq, "ack": ack, "ttl": h.mgr.cfg.FakeTTL,
-	}).Info("fake ClientHellos injected")
+	if sent {
+		h.mgr.fakesInjected.Add(1)
+		h.mgr.logger.WithFields(logrus.Fields{
+			"event": "inject", "dst": dst, "seq": seq, "ack": ack, "ttl": h.mgr.cfg.FakeTTL,
+		}).Info("fake ClientHellos injected")
+	} else {
+		h.mgr.injectErrors.Add(1)
+	}
 
 	// Let fakes reach DPI before the real ClientHello.
 	time.Sleep(2 * time.Millisecond)

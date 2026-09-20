@@ -12,6 +12,7 @@ import (
 
 	gecitdns "github.com/boratanrikulu/gecit/pkg/dns"
 	"github.com/boratanrikulu/gecit/pkg/engine"
+	"github.com/boratanrikulu/gecit/pkg/panel"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -27,6 +28,8 @@ var configKeys = []string{
 	"fake_ttl",
 	"interface",
 	"mss",
+	"panel_addr",
+	"panel_enabled",
 	"ports",
 	"restore_after_bytes",
 	"restore_mss",
@@ -199,6 +202,11 @@ func validateConfig(cfg engine.Config) error {
 			return fmt.Errorf("doh_upstream: %w", err)
 		}
 	}
+	if cfg.PanelEnabled {
+		if err := panel.ValidateAddr(cfg.PanelAddr); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -227,7 +235,13 @@ doh_enabled: %t
 doh_upstream: %q
 
 # Debug logging.
-verbose: false
+verbose: %t
+
+# Local web panel: stats, logs and this config in a browser.
+# Loopback only, and it requires the token in %s.
+# Reached at http://gecit.localhost:8088, which needs no DNS record.
+panel_enabled: %t
+panel_addr: %q
 
 # Linux only, ignored on macOS and Windows.
 mss: %d
@@ -240,6 +254,10 @@ cgroup_path: %q
 		cfg.FakeTTL,
 		cfg.DoHEnabled,
 		cfg.DoHUpstream,
+		cfg.Verbose,
+		panelTokenPath(),
+		cfg.PanelEnabled,
+		cfg.PanelAddr,
 		cfg.MSS,
 		cfg.RestoreAfterBytes,
 		cfg.RestoreMSS,

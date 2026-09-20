@@ -14,7 +14,8 @@ no config file.
 
 ```
 cmd/gecit/app/     cobra commands: run, status, cleanup, config, service
-pkg/engine/        Engine interface (Start/Stop/Mode) + Config struct
+pkg/panel/         local web panel: HTTP API, log ring, embedded page
+pkg/engine/        Engine interface (Start/Stop/Mode/Stats) + Config struct
 pkg/ebpf/          Linux engine: sock_ops, kernel side written in Go via gobee
 pkg/tun/           macOS/Windows engine: sing-tun + gVisor netstack
 pkg/rawsock/       raw packet injection, per-OS
@@ -24,7 +25,7 @@ pkg/dns/           DoH server + system DNS takeover/restore, per-OS
 pkg/fake/          fake ClientHello construction
 ```
 
-Two engines behind one interface (`pkg/engine/engine.go:7`): eBPF sock_ops on
+Two engines behind one interface (`pkg/engine/engine.go:7`, Start/Stop/Mode/Stats): eBPF sock_ops on
 Linux, TUN transparent proxy on macOS and Windows. `newPlatformEngine` has one
 definition per platform: `run_linux.go` by filename suffix, `run_tun.go` by
 `//go:build (darwin || windows) && with_gvisor`.
@@ -129,7 +130,56 @@ in this repo.
   needs `AllowSameVersionUpgrades`.
 - Config lives in `config.yaml`: `/etc/gecit/` on unix, `%ProgramData%\gecit\`
   on Windows. Adding a key means adding it to `configKeys` in
-  `cmd/gecit/app/config.go`, or the loader rejects it as unknown.
+  `cmd/gecit/app/config.go`, or the loader rejects it as unknown. A key a flag
+  binds to also needs an entry in `flagForKey` in `cmd/gecit/app/runner.go`, so
+  the panel can say which flag is overriding it.
+
+## The web panel
+
+`pkg/panel` is pure Go with no build tags, so it compiles on all three targets.
+It talks to `cmd/gecit/app`'s `runner` through the `panel.Controller` interface;
+everything that knows about gecit lives on the cmd side.
+
+- **The runner owns the engine, not `supervise`.** The panel has to outlive an
+  engine restart, so `supervise_unix.go` and `supervise_windows.go` drive the
+  runner and the runner swaps engines underneath. Driving the Windows SCM to
+  restart the process serving the page does not work.
+
+- **`runner.Apply` stops before it builds.** `newPlatformEngine` resolves the
+  DoH upstream hostname with `net.LookupIP` (`cmd/gecit/app/run_linux.go:66`), and while gecit
+  runs the system resolver is gecit. Building the new engine first sends that
+  lookup into a resolver that is being torn down.
+
+- **The activity feed comes from the log hook, not from `PopDomain`.**
+  `pkg/dns.PopDomain` deletes what it returns and both injectors already consume
+  it, so a second reader would steal the domain from the injector. The three
+  call sites that matter tag their log line with an `event` field, which is what
+  `Ring.Activity` filters on.
+
+- **logrus checks the level before firing a hook.** DNS resolutions are logged
+  at debug, so the panel cannot show them unless the logger is at debug. That is
+  why the panel has a level toggle instead of a scheme that keeps stderr quiet.
+
+- **The panel's name needs no DNS.** `gecit.localhost` is in the Host allowlist
+  and is what `URL` prints. Anything under `.localhost` is reserved by RFC 6761
+  and mapped to loopback by the browser, so it works with `--doh=false` and in a
+  browser doing its own DoH. A lookalike like `gecit.localhost.evil.example` is
+  not allowed.
+
+- **The token file gates a root process.** Whoever reads
+  `<datadir>/panel.token` can rewrite the config and restart the engine, so a
+  mode allowing group or other is refused rather than repaired. On Windows the
+  data directory grants Builtin\Users read so an operator can open the log, and
+  that entry inherits, so the token is created through `windows.CreateFile` with
+  its own protected SD rather than created and then repaired.
+
+  Known gap, inherited from the data directory: `%ProgramData%` lets any user
+  create `gecit\` and own it. `createDataDir` reasserts that directory's DACL on
+  every start but not its owner, and an owner keeps `WRITE_DAC` whatever the
+  DACL says. Fixing it means passing `OWNER_SECURITY_INFORMATION` in
+  `applyDataDirACL`. Someone who reaches that far can also plant a junction
+  where a file is about to be created, which is why the token create passes
+  `FILE_FLAG_OPEN_REPARSE_POINT`.
 
 ## Two invariants that look like cleanup opportunities
 

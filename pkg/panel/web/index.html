@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gecit</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div id="gate" class="gate hidden">
+  <h1>gecit</h1>
+  <p>This panel needs the token from <code id="gate-path">the gecit data directory</code>.</p>
+  <p>Run <code>sudo gecit status</code> to print the full URL, or paste the token here.</p>
+  <form id="gate-form">
+    <input id="gate-token" type="password" autocomplete="off" placeholder="panel token">
+    <button type="submit">Open</button>
+  </form>
+  <p id="gate-error" class="error hidden"></p>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <h1>gecit</h1>
+    <span id="state-pill" class="pill">connecting</span>
+    <span id="mode" class="muted"></span>
+    <span id="uptime" class="muted"></span>
+    <span class="spacer"></span>
+    <button id="btn-start" class="hidden">Start</button>
+    <button id="btn-stop" class="hidden">Stop</button>
+  </header>
+
+  <p id="banner" class="error hidden"></p>
+
+  <nav>
+    <button class="tab active" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="activity">Activity</button>
+    <button class="tab" data-tab="logs">Logs</button>
+    <button class="tab" data-tab="config">Config</button>
+  </nav>
+
+  <section id="tab-overview">
+    <div id="counters" class="counters"></div>
+    <h2>System</h2>
+    <table id="platform" class="facts"></table>
+  </section>
+
+  <section id="tab-activity" class="hidden">
+    <p class="muted">Domains gecit resolved and injected into, newest first. This list is
+    held in memory only and goes when gecit stops. The log itself is a separate
+    thing: on Windows a service writes it to disk, so what the level emits is
+    kept there.</p>
+    <table id="activity" class="rows">
+      <thead><tr><th>Time</th><th>Event</th><th>Destination</th><th>Detail</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section id="tab-logs" class="hidden">
+    <div class="row">
+      <label for="loglevel">Level</label>
+      <select id="loglevel">
+        <option value="info">info</option>
+        <option value="debug">debug (includes every DNS lookup)</option>
+      </select>
+      <label class="checkbox"><input id="follow" type="checkbox" checked> Follow</label>
+    </div>
+    <pre id="logs"></pre>
+  </section>
+
+  <section id="tab-config" class="hidden">
+    <p class="muted">Saving rewrites <code id="config-path"></code> from these values.
+    Apply restarts the engine, which hands system DNS back and takes it again.</p>
+    <form id="config-form"></form>
+    <div class="row">
+      <button id="btn-save" type="button">Save</button>
+      <button id="btn-apply" type="button">Save and apply</button>
+      <span id="config-status" class="muted"></span>
+    </div>
+  </section>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
