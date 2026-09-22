@@ -2,4 +2,8 @@
 
 package app
 
-func defaultConfigPath() string { return "/etc/gecit/config.yaml" }
+import "path/filepath"
+
+func gecitDataDir() string { return "/etc/gecit" }
+
+func defaultConfigPath() string { return filepath.Join(gecitDataDir(), "config.yaml") }

@@ -81,3 +81,11 @@ func (e *tunEngine) Stop() error {
 }
 
 func (e *tunEngine) Mode() string { return "tun" }
+
+func (e *tunEngine) Stats() engine.Stats {
+	stats := e.mgr.Stats()
+	dns := e.dns.Stats()
+	stats.DNSQueries = dns.DNSQueries
+	stats.DNSErrors = dns.DNSErrors
+	return stats
+}

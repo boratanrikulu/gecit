@@ -3,6 +3,7 @@ package seqtrack
 import (
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/boratanrikulu/gecit/pkg/capture"
@@ -48,16 +49,19 @@ func (st *SeqTracker) Stop() {
 	}
 }
 
-var globalSeqTracker *SeqTracker
+// The tracker is swapped whenever the engine starts or stops, which the panel
+// can do while connection goroutines are calling GetSeqAck.
+var globalSeqTracker atomic.Pointer[SeqTracker]
 
 func SetSeqTracker(st *SeqTracker) {
-	globalSeqTracker = st
+	globalSeqTracker.Store(st)
 }
 
 // GetSeqAck returns the real TCP seq/ack for a connection by waiting for
 // pcap to capture the SYN-ACK.
 func GetSeqAck(conn net.Conn) (seq, ack uint32) {
-	if globalSeqTracker == nil {
+	st := globalSeqTracker.Load()
+	if st == nil {
 		return 1, 1
 	}
 
@@ -70,7 +74,7 @@ func GetSeqAck(conn net.Conn) (seq, ack uint32) {
 
 	// Wait for pcap to capture our SYN-ACK. Returns immediately when found
 	// (typically <10ms after Dial). 500ms is a safe upper bound.
-	evt := globalSeqTracker.WaitForSeqAck(localPort, 500*time.Millisecond)
+	evt := st.WaitForSeqAck(localPort, 500*time.Millisecond)
 	if evt == nil {
 		logrus.WithField("port", localPort).Warn("seq/ack fallback to placeholder — fake may be rejected by DPI")
 		return 1, 1

@@ -34,3 +34,25 @@ func TestValidateUpstreams(t *testing.T) {
 		}
 	}
 }
+
+// The panel builds its upstream picker from this list, so every name it offers
+// has to be one the validator then accepts.
+func TestPresetNames(t *testing.T) {
+	names := PresetNames()
+	if len(names) != len(Presets) {
+		t.Fatalf("PresetNames returned %d of %d presets", len(names), len(Presets))
+	}
+
+	for i, name := range names {
+		if i > 0 && names[i-1] >= name {
+			t.Errorf("PresetNames is not sorted: %v", names)
+			break
+		}
+		if _, ok := Presets[name]; !ok {
+			t.Errorf("PresetNames offers %q, which is not a preset", name)
+		}
+		if err := ValidateUpstreams(name); err != nil {
+			t.Errorf("preset %q does not validate: %v", name, err)
+		}
+	}
+}

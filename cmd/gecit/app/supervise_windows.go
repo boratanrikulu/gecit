@@ -1,9 +1,6 @@
 package app
 
 import (
-	"context"
-
-	"github.com/boratanrikulu/gecit/pkg/engine"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/eventlog"
@@ -24,19 +21,19 @@ const (
 	stopWaitHintMS  = 45000
 )
 
-func supervise(eng engine.Engine, logger *logrus.Logger) error {
+func supervise(r *runner, logger *logrus.Logger) error {
 	if !underServiceManager() {
-		return runInteractive(eng, logger)
+		return runInteractive(r, logger)
 	}
 	return svc.Run(serviceName, &serviceHandler{
-		eng:    eng,
+		runner: r,
 		logger: logger,
 		elog:   openEventLog(),
 	})
 }
 
 type serviceHandler struct {
-	eng    engine.Engine
+	runner *runner
 	logger *logrus.Logger
 	elog   *eventlog.Log
 }
@@ -55,10 +52,7 @@ func (h *serviceHandler) Execute(args []string, r <-chan svc.ChangeRequest, chan
 	// making would leave a hung start looking healthy forever.
 	changes <- svc.Status{State: svc.StartPending, CheckPoint: 1, WaitHint: startWaitHintMS}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	err := h.eng.Start(ctx)
+	err := h.runner.Start()
 
 	if err != nil {
 		h.logger.WithError(err).Error("engine failed to start")
@@ -75,8 +69,8 @@ func (h *serviceHandler) Execute(args []string, r <-chan svc.ChangeRequest, chan
 		State:   svc.Running,
 		Accepts: svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPreShutdown,
 	}
-	h.logger.WithField("mode", h.eng.Mode()).Info("gecit is running as a service")
-	h.eventInfo(eventStarted, "gecit started in "+h.eng.Mode()+" mode")
+	h.logger.WithField("mode", h.runner.Mode()).Info("gecit is running as a service")
+	h.eventInfo(eventStarted, "gecit started in "+h.runner.Mode()+" mode")
 
 loop:
 	for c := range r {
@@ -94,7 +88,7 @@ loop:
 	// few seconds AcceptShutdown alone would give, which is what restoring DNS
 	// and tearing down routes needs.
 	changes <- svc.Status{State: svc.StopPending, CheckPoint: 0, WaitHint: stopWaitHintMS}
-	err = h.eng.Stop()
+	err = h.runner.Stop()
 
 	if err != nil {
 		h.logger.WithError(err).Error("engine failed to stop cleanly")

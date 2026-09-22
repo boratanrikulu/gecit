@@ -175,6 +175,49 @@ The service logs to `C:\ProgramData\gecit\gecit.log`, rotating at 10 MB and
 keeping 3 files. Start, stop and start failures also land in the Windows
 Application event log under the source `gecit`.
 
+### Web panel
+
+`gecit run` also serves a local panel: live counters, the log stream, the
+domains it injected into, and the config file as a form.
+
+```bash
+sudo gecit run              # prints the panel URL, token included
+sudo gecit status           # prints it again later
+sudo gecit run --panel=false
+sudo gecit run --panel-addr 127.0.0.1:9000   # move it off the default port
+```
+
+Open it at `http://gecit.localhost:8088`, which is the URL gecit prints.
+Anything under `.localhost` is reserved by RFC 6761 and mapped to loopback by
+the browser itself, so there is no DNS record, no hosts file and nothing to
+clean up. It resolves the same with `--doh=false`, and in a browser that does
+its own DoH. `http://127.0.0.1:8088` works just as well.
+
+It binds to `127.0.0.1:8088` and refuses any address that is not loopback. A
+port already in use is a warning rather than a failure: gecit runs without the
+panel rather than not at all.
+Every API call needs a token kept in `/etc/gecit/panel.token` (`%ProgramData%\gecit\panel.token`
+on Windows), readable by root or Administrators only. Open the URL once and the
+browser keeps the token, so afterwards the address alone is enough. A token the
+panel stops accepting is dropped and the page asks for a new one. To reach it from another machine, forward the
+port over SSH rather than changing the address.
+
+The panel can start and stop the engine, and saving the config from it rewrites
+`config.yaml`. Applying restarts the engine, which hands system DNS back and
+takes it again, so expect a second without name resolution. A value passed as a
+flag on the command line still wins over the file, and the panel says so next to
+the ones it affects.
+
+The activity list lives in memory only and goes when gecit stops. It holds
+domain names, so it is worth knowing it is there. The log is a separate matter:
+a Windows service writes it to `C:\ProgramData\gecit\gecit.log`, so whatever
+the level emits is kept on disk. DNS lookups are logged at debug, which is off
+by default; switching the level in the panel turns every resolved domain into a
+line in that file.
+
+The first run creates `panel.token` next to the config file. Delete it to
+invalidate every URL handed out so far; the next start writes a new one.
+
 ### Config file
 
 A service started by Windows has no command line, so gecit reads settings from
@@ -216,6 +259,8 @@ already pointed the system resolver at itself.
 | `--ports` | `443` | Target destination ports |
 | `--interface` | auto | Network interface |
 | `-v` | off | Verbose/debug logging |
+| `--panel` | `true` | Serve the local web panel |
+| `--panel-addr` | `127.0.0.1:8088` | Panel address, loopback only |
 | `--config` | per-platform | Config file path (see Config file above) |
 
 ### DoH presets
@@ -321,6 +366,7 @@ Most Windows DPI bypass tools use WinDivert, but its code signing certificate ex
 - [x] macOS - TUN transparent proxy
 - [x] DoH DNS resolver
 - [x] Windows - TUN transparent proxy
+- [x] Local web panel
 - [ ] Auto-TTL detection (traceroute to find DPI hop count)
 - [ ] ECH (Encrypted Client Hello) support
 

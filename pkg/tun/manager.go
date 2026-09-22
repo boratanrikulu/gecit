@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"sync/atomic"
 	"time"
 
+	"github.com/boratanrikulu/gecit/pkg/engine"
 	"github.com/boratanrikulu/gecit/pkg/rawsock"
 	"github.com/boratanrikulu/gecit/pkg/seqtrack"
 	"github.com/sagernet/sing-tun"
@@ -38,6 +40,19 @@ type Manager struct {
 	bindControl    control.Func
 	networkMonitor tun.NetworkUpdateMonitor
 	ifaceMonitor   tun.DefaultInterfaceMonitor
+	seqTracker     *seqtrack.SeqTracker
+
+	connections   atomic.Uint64
+	fakesInjected atomic.Uint64
+	injectErrors  atomic.Uint64
+}
+
+func (m *Manager) Stats() engine.Stats {
+	return engine.Stats{
+		Connections:   m.connections.Load(),
+		FakesInjected: m.fakesInjected.Load(),
+		InjectErrors:  m.injectErrors.Load(),
+	}
 }
 
 func NewManager(cfg Config, logger *logrus.Logger) *Manager {
@@ -58,8 +73,18 @@ func NewManager(cfg Config, logger *logrus.Logger) *Manager {
 	}
 }
 
-func (m *Manager) Start(ctx context.Context) error {
+func (m *Manager) Start(ctx context.Context) (err error) {
 	m.ctx, m.cancel = context.WithCancel(ctx)
+
+	// Each step below brings something up that the next one can fail after.
+	// The panel can retry a config that fails, so a half-started manager has to
+	// leave nothing behind: a pcap handle, a TUN device and two route monitors
+	// per attempt otherwise.
+	defer func() {
+		if err != nil {
+			m.teardown()
+		}
+	}()
 
 	physIface := m.cfg.Interface
 	if physIface == "" {
@@ -77,14 +102,12 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 
 	if err := m.initNetworking(physIface); err != nil {
-		m.rawSock.Close()
 		return err
 	}
 
 	tunOpts := m.tunOptions()
 	tunDevice, err := tun.New(tunOpts)
 	if err != nil {
-		m.rawSock.Close()
 		return fmt.Errorf("create TUN: %w", err)
 	}
 	m.tunDevice = tunDevice
@@ -103,22 +126,15 @@ func (m *Manager) Start(ctx context.Context) error {
 		InterfaceFinder:        m.ifaceFinder,
 	})
 	if err != nil {
-		tunDevice.Close()
-		m.rawSock.Close()
 		return fmt.Errorf("create stack: %w", err)
 	}
 	m.stack = stack
 
 	if err := tunDevice.Start(); err != nil {
-		stack.Close()
-		tunDevice.Close()
-		m.rawSock.Close()
 		return fmt.Errorf("start TUN: %w", err)
 	}
 
 	if err := stack.Start(); err != nil {
-		tunDevice.Close()
-		m.rawSock.Close()
 		return fmt.Errorf("start stack: %w", err)
 	}
 
@@ -137,25 +153,37 @@ func (m *Manager) Stop() error {
 	if m.cancel != nil {
 		m.cancel()
 	}
-	if m.stack != nil {
-		m.stack.Close()
-	}
-	if m.tunDevice != nil {
-		m.tunDevice.Close()
-	}
-	if m.rawSock != nil {
-		m.rawSock.Close()
-	}
-	if m.ifaceMonitor != nil {
-		m.ifaceMonitor.Close()
-	}
-	if m.networkMonitor != nil {
-		m.networkMonitor.Close()
-	}
-	seqtrack.SetSeqTracker(nil)
+	m.teardown()
 
 	m.logger.Info("TUN engine stopped")
 	return nil
+}
+
+// teardown releases everything Start brought up, in the reverse order. Each
+// field is cleared as it goes, so a stop after a failed start closes what
+// exists and nothing twice.
+func (m *Manager) teardown() {
+	if m.stack != nil {
+		m.stack.Close()
+		m.stack = nil
+	}
+	if m.tunDevice != nil {
+		m.tunDevice.Close()
+		m.tunDevice = nil
+	}
+	if m.rawSock != nil {
+		m.rawSock.Close()
+		m.rawSock = nil
+	}
+	if m.ifaceMonitor != nil {
+		m.ifaceMonitor.Close()
+		m.ifaceMonitor = nil
+	}
+	if m.networkMonitor != nil {
+		m.networkMonitor.Close()
+		m.networkMonitor = nil
+	}
+	m.stopSeqTracker()
 }
 
 func (m *Manager) dialServer(network, addr string, timeout time.Duration) (net.Conn, error) {
@@ -186,9 +214,20 @@ func (m *Manager) startSeqTracker(iface string) error {
 	if err != nil {
 		return err
 	}
+	m.seqTracker = st
 	seqtrack.SetSeqTracker(st)
 	m.logger.WithField("interface", iface).Info("seq/ack tracker active")
 	return nil
+}
+
+// stopSeqTracker releases the pcap handle. Dropping only the global would leave
+// the tracker capturing into a map nothing drains.
+func (m *Manager) stopSeqTracker() {
+	if m.seqTracker != nil {
+		m.seqTracker.Stop()
+		m.seqTracker = nil
+	}
+	seqtrack.SetSeqTracker(nil)
 }
 
 // initNetworking sets up interface binding, network monitor, and interface
@@ -212,7 +251,6 @@ func (m *Manager) initNetworking(physIface string) error {
 		return fmt.Errorf("start network monitor: %w", err)
 	}
 	if err := m.ifaceMonitor.Start(); err != nil {
-		m.networkMonitor.Close()
 		return fmt.Errorf("start interface monitor: %w", err)
 	}
 	return nil

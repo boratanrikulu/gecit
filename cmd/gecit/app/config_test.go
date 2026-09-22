@@ -140,6 +140,9 @@ func TestRunFlagsBindToConfigKeys(t *testing.T) {
 		if err := runCmd.Flags().Set(tc.flag, original); err != nil {
 			t.Fatal(err)
 		}
+		// pflag leaves Changed set for good, and flagOverrides reads it, so
+		// without this every later test sees these three as overridden.
+		f.Changed = false
 	}
 }
 
@@ -278,5 +281,41 @@ func TestEngineConfigFromViperValidates(t *testing.T) {
 		if _, err := engineConfigFromViper(v); err == nil {
 			t.Errorf("%s should be rejected by engineConfigFromViper", name)
 		}
+	}
+}
+
+func TestRenderConfigRoundTripsPanelKeys(t *testing.T) {
+	cfg := engine.DefaultConfig()
+	cfg.PanelEnabled = true
+	cfg.PanelAddr = "127.0.0.1:9100"
+
+	v := testViper(t, renderConfig(cfg))
+
+	if !v.GetBool("panel_enabled") {
+		t.Error("panel_enabled did not survive the round trip")
+	}
+	if got := v.GetString("panel_addr"); got != "127.0.0.1:9100" {
+		t.Errorf("panel_addr = %q, want 127.0.0.1:9100", got)
+	}
+}
+
+// The panel rewrites the config of a process running as root and restarts its
+// engine, so a bind anything off the machine can reach is refused at startup
+// rather than left to a firewall.
+func TestValidateConfigRefusesARemotePanel(t *testing.T) {
+	for _, addr := range []string{"0.0.0.0:8088", "192.168.1.5:8088", "[::]:8088", "8088", ""} {
+		cfg := engine.DefaultConfig()
+		cfg.PanelAddr = addr
+		if err := validateConfig(cfg); err == nil {
+			t.Errorf("panel_addr %q should be rejected", addr)
+		}
+	}
+
+	// A disabled panel never binds, so its address does not matter.
+	cfg := engine.DefaultConfig()
+	cfg.PanelEnabled = false
+	cfg.PanelAddr = "0.0.0.0:8088"
+	if err := validateConfig(cfg); err != nil {
+		t.Errorf("the address should be ignored when the panel is off, got %v", err)
 	}
 }

@@ -19,7 +19,19 @@ func init() {
 
 func showStatus(cmd *cobra.Command, args []string) error {
 	fmt.Printf("gecit status\n")
-	fmt.Printf("  platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
-	printPlatformStatus()
+	fmt.Printf("  %-12s%s/%s\n", "platform:", runtime.GOOS, runtime.GOARCH)
+	for _, f := range platformFacts() {
+		fmt.Printf("  %-12s%s\n", f.Name+":", f.Value)
+	}
+	for _, f := range panelFacts() {
+		fmt.Printf("  %-12s%s\n", f.Name+":", f.Value)
+	}
 	return nil
+}
+
+func boolStatus(ok bool) string {
+	if ok {
+		return "supported"
+	}
+	return "NOT supported"
 }

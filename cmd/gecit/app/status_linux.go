@@ -1,27 +1,20 @@
 package app
 
 import (
-	"fmt"
 	"os"
 
 	bpf "github.com/boratanrikulu/gecit/pkg/ebpf"
+	"github.com/boratanrikulu/gecit/pkg/panel"
 )
 
-func printPlatformStatus() {
-	fmt.Printf("  engine:     ebpf-sockops\n")
+func platformFacts() []panel.Fact {
+	facts := []panel.Fact{{Name: "engine", Value: "ebpf-sockops"}}
 
 	if os.Geteuid() != 0 {
-		fmt.Printf("  (run with sudo for accurate capability detection)\n")
-		return
+		return append(facts, panel.Fact{Name: "note", Value: "run with sudo for accurate capability detection"})
 	}
-
-	fmt.Printf("  sock_ops:   %s\n", boolStatus(bpf.HaveSockOps()))
-	fmt.Printf("  setsockopt: %s\n", boolStatus(bpf.HaveSockOpsSetsockopt()))
-}
-
-func boolStatus(ok bool) string {
-	if ok {
-		return "supported"
-	}
-	return "NOT supported"
+	return append(facts,
+		panel.Fact{Name: "sock_ops", Value: boolStatus(bpf.HaveSockOps())},
+		panel.Fact{Name: "setsockopt", Value: boolStatus(bpf.HaveSockOpsSetsockopt())},
+	)
 }

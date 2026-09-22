@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 
+	"github.com/boratanrikulu/gecit/pkg/engine"
 	"github.com/miekg/dns"
 	"github.com/sirupsen/logrus"
 )
@@ -16,11 +18,23 @@ type Server struct {
 	logger   *logrus.Logger
 	mu       sync.Mutex
 	ipQueue  map[string][]string
+
+	queries atomic.Uint64
+	errors  atomic.Uint64
 }
 
-var globalDNS *Server
+func (s *Server) Stats() engine.Stats {
+	return engine.Stats{
+		DNSQueries: s.queries.Load(),
+		DNSErrors:  s.errors.Load(),
+	}
+}
 
-func GetDNSServer() *Server { return globalDNS }
+// The server is replaced whenever the engine restarts, which the panel can do
+// while injector goroutines are calling GetDNSServer.
+var globalDNS atomic.Pointer[Server]
+
+func GetDNSServer() *Server { return globalDNS.Load() }
 
 func (s *Server) PopDomain(ip string) string {
 	s.mu.Lock()
@@ -45,7 +59,7 @@ func NewServer(upstream string, logger *logrus.Logger, dial DialFunc) *Server {
 		logger:   logger,
 		ipQueue:  make(map[string][]string),
 	}
-	globalDNS = s
+	globalDNS.Store(s)
 	return s
 }
 
@@ -93,14 +107,18 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
+	s.queries.Add(1)
+
 	queryBytes, err := r.Pack()
 	if err != nil {
+		s.errors.Add(1)
 		s.sendError(w, r, dns.RcodeServerFailure)
 		return
 	}
 
 	result, err := s.resolver.Resolve(queryBytes)
 	if err != nil {
+		s.errors.Add(1)
 		s.logger.WithError(err).Debug("DNS resolve failed")
 		s.sendError(w, r, dns.RcodeServerFailure)
 		return
@@ -108,6 +126,7 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 
 	resp := new(dns.Msg)
 	if err := resp.Unpack(result.Data); err != nil {
+		s.errors.Add(1)
 		s.sendError(w, r, dns.RcodeServerFailure)
 		return
 	}
@@ -132,6 +151,7 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 			}
 			domain := strings.TrimSuffix(q.Name, ".")
 			s.logger.WithFields(logrus.Fields{
+				"event":  "dns",
 				"domain": domain,
 				"ips":    strings.Join(ips, ","),
 				"via":    result.Via,

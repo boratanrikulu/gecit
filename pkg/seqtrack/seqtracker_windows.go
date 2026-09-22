@@ -3,6 +3,7 @@ package seqtrack
 import (
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/boratanrikulu/gecit/pkg/capture"
@@ -46,14 +47,17 @@ func (st *SeqTracker) Stop() {
 	}
 }
 
-var globalSeqTracker *SeqTracker
+// The tracker is swapped whenever the engine starts or stops, which the panel
+// can do while connection goroutines are calling GetSeqAck.
+var globalSeqTracker atomic.Pointer[SeqTracker]
 
 func SetSeqTracker(st *SeqTracker) {
-	globalSeqTracker = st
+	globalSeqTracker.Store(st)
 }
 
 func GetSeqAck(conn net.Conn) (seq, ack uint32) {
-	if globalSeqTracker == nil {
+	st := globalSeqTracker.Load()
+	if st == nil {
 		return 1, 1
 	}
 
@@ -64,7 +68,7 @@ func GetSeqAck(conn net.Conn) (seq, ack uint32) {
 
 	localPort := uint16(tcpConn.LocalAddr().(*net.TCPAddr).Port)
 
-	evt := globalSeqTracker.WaitForSeqAck(localPort, 500*time.Millisecond)
+	evt := st.WaitForSeqAck(localPort, 500*time.Millisecond)
 	if evt == nil {
 		logrus.WithField("port", localPort).Warn("seq/ack fallback — Npcap may not be capturing")
 		return 1, 1

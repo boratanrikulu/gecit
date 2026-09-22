@@ -173,6 +173,50 @@ Servis `C:\ProgramData\gecit\gecit.log` dosyasına yazar, 10 MB'da döner ve 3
 dosya saklar. Başlatma, durdurma ve başlatma hataları ayrıca Windows Uygulama
 olay günlüğüne `gecit` kaynağı altında düşer.
 
+### Web paneli
+
+`gecit run` aynı zamanda yerel bir panel açar: anlık sayaçlar, log akışı, sahte
+paket gönderilen alan adları ve config dosyası bir form olarak.
+
+```bash
+sudo gecit run              # panel adresini token'ıyla birlikte yazar
+sudo gecit status           # sonradan tekrar görmek için
+sudo gecit run --panel=false
+sudo gecit run --panel-addr 127.0.0.1:9000   # paneli başka bir porta taşı
+```
+
+Paneli `http://gecit.localhost:8088` adresinden açarsınız, gecit de bu adresi
+yazar. `.localhost` altındaki her isim RFC 6761 ile ayrılmıştır ve tarayıcı
+bunları kendisi loopback'e çözer: ne DNS kaydı ne hosts dosyası gerekir, geriye
+temizlenecek bir şey kalmaz. `--doh=false` ile de, kendi DoH'unu kullanan bir
+tarayıcıda da aynı şekilde çözülür. `http://127.0.0.1:8088` de aynı işi görür.
+
+Panel `127.0.0.1:8088` adresine bağlanır ve loopback olmayan hiçbir adresi kabul
+etmez. Port doluysa bu bir uyarıdır, hata değil: gecit panelsiz çalışmaya devam
+eder. Her API isteği `/etc/gecit/panel.token` dosyasındaki token'ı ister
+(Windows'ta `%ProgramData%\gecit\panel.token`); dosyayı yalnızca root ya da
+Yöneticiler okuyabilir. Adresi bir kez açtığınızda tarayıcı token'ı saklar, sonrasında
+adresin kendisi yeter. Panelin artık kabul etmediği bir token atılır ve sayfa
+yenisini ister. Başka bir makineden erişmek için adresi değiştirmek yerine portu SSH
+üzerinden yönlendirin.
+
+Panelden motoru durdurup başlatabilirsiniz; config'i kaydetmek `config.yaml`
+dosyasını baştan yazar. Uygula demek motoru yeniden başlatır, yani sistem DNS'i
+önce geri verilir sonra tekrar alınır: bir saniyeliğine ad çözümlemesi durur.
+Komut satırında verilen bir parametre yine dosyanın önüne geçer, panel de
+hangi alanlar için geçtiğini yanlarında söyler.
+
+Etkinlik listesi yalnızca bellekte durur ve gecit durduğunda kaybolur. İçinde
+alan adları olduğu için bunu bilmekte fayda var. Log ayrı bir mesele: Windows'ta
+servis logu `C:\ProgramData\gecit\gecit.log` dosyasına yazar, yani seviyenin
+ürettiği her şey diskte kalır. DNS sorguları debug seviyesinde loglanır ve bu
+seviye varsayılan olarak kapalıdır; panelden açtığınızda çözülen her alan adı o
+dosyaya bir satır olarak düşer.
+
+İlk çalıştırmada config dosyasının yanına `panel.token` oluşturulur. Dosyayı
+silerseniz o güne kadar verilmiş bütün adresler geçersiz olur, bir sonraki
+başlangıçta yenisi yazılır.
+
 ### Config dosyası
 
 Windows'un başlattığı bir servisin komut satırı olmadığı için gecit ayarları
@@ -214,6 +258,8 @@ sistem çözücüsünü çoktan kendine yönlendirmiştir.
 | `--ports` | `443` | Hedef portlar |
 | `--interface` | otomatik | Ağ arayüzü |
 | `-v` | kapalı | Ayrıntılı loglama |
+| `--panel` | `true` | Yerel web panelini aç |
+| `--panel-addr` | `127.0.0.1:8088` | Panel adresi, yalnızca loopback |
 | `--config` | platforma göre | Config dosyası yolu (Config dosyası bölümüne bakın) |
 
 ### DoH hazır ayarları
@@ -315,6 +361,7 @@ Windows'ta DPI bypass araçlarının çoğu WinDivert kullanır, ancak WinDivert
 - [x] macOS - TUN şeffaf proxy
 - [x] DoH DNS sunucusu
 - [x] Windows - TUN şeffaf proxy
+- [x] Yerel web paneli
 - [ ] Otomatik TTL tespiti (DPI hop sayısını bulmak için traceroute)
 - [ ] ECH (Encrypted Client Hello) desteği
 

@@ -181,11 +181,15 @@ func ValidateUpstreams(upstreams string) error {
 	return nil
 }
 
-func presetNames() string {
+// PresetNames lists the upstream names an operator can use in place of a URL,
+// sorted so a form built from them keeps a stable order.
+func PresetNames() []string {
 	names := make([]string, 0, len(Presets))
 	for name := range Presets {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	return strings.Join(names, ", ")
+	return names
 }
+
+func presetNames() string { return strings.Join(PresetNames(), ", ") }

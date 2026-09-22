@@ -1,28 +1,29 @@
 package app
 
 import (
-	"fmt"
-
 	"github.com/boratanrikulu/gecit/pkg/capture"
+	"github.com/boratanrikulu/gecit/pkg/panel"
 )
 
-func printPlatformStatus() {
-	fmt.Printf("  engine:     tun (wintun)\n")
-	fmt.Printf("  wintun:     embedded in gecit.exe\n")
-
+func platformFacts() []panel.Fact {
+	npcap := "not installed, required for DPI bypass (https://npcap.com)"
 	if capture.NpcapAvailable() {
-		fmt.Printf("  npcap:      installed\n")
-	} else {
-		fmt.Printf("  npcap:      not installed, required for DPI bypass (https://npcap.com)\n")
+		npcap = "installed"
 	}
 
-	fmt.Printf("  service:    %s\n", serviceStatusLine())
-	fmt.Printf("  config:     %s\n", resolveConfigPath())
-	fmt.Printf("  log:        %s\n", logFilePath())
+	facts := []panel.Fact{
+		{Name: "engine", Value: "tun (wintun)"},
+		{Name: "wintun", Value: "embedded in gecit.exe"},
+		{Name: "npcap", Value: npcap},
+		{Name: "service", Value: serviceStatusLine()},
+		{Name: "config", Value: resolveConfigPath()},
+		{Name: "log", Value: logFilePath()},
+	}
 
 	if err := checkPrivileges(); err != nil {
-		fmt.Printf("  (running gecit needs Administrator)\n")
+		facts = append(facts, panel.Fact{Name: "note", Value: "running gecit needs Administrator"})
 	}
+	return facts
 }
 
 func serviceStatusLine() string {
