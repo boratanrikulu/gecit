@@ -1,0 +1,41 @@
+cask "gecit" do
+  version "@@VERSION@@"
+
+  on_macos do
+    on_arm do
+      sha256 "@@SHA256_ARM64@@"
+      url "https://github.com/boratanrikulu/gecit/releases/download/v#{version}/gecit_#{version}_darwin_arm64.tar.gz"
+    end
+    on_intel do
+      sha256 "@@SHA256_AMD64@@"
+      url "https://github.com/boratanrikulu/gecit/releases/download/v#{version}/gecit_#{version}_darwin_amd64.tar.gz"
+    end
+  end
+
+  name "gecit"
+  desc "DPI bypass via fake TLS ClientHello injection, with a built-in DoH resolver"
+  homepage "https://github.com/boratanrikulu/gecit"
+
+  livecheck do
+    skip "Auto-generated on release."
+  end
+
+  binary "gecit"
+
+  # gecit has no code-signing certificate, so Gatekeeper refuses to run the
+  # downloaded binary until the quarantine flag comes off it.
+  postflight_steps do
+    run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "gecit"], chdir: "."
+  end
+
+  caveats <<~EOS
+    gecit needs root:
+
+      sudo gecit run
+
+    It points system DNS at its own DoH resolver and restores the previous
+    settings on Ctrl+C. After a crash, run `sudo gecit cleanup`.
+
+    Uninstalling leaves /etc/gecit behind. Remove it with `sudo rm -rf /etc/gecit`.
+  EOS
+end

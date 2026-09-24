@@ -1,0 +1,49 @@
+# nfpm builds the deb, rpm and apk from a binary the release matrix already
+# compiled. VERSION, ARCH and BINARY come from the environment:
+#
+#   VERSION=0.2.0 ARCH=amd64 BINARY=./gecit-linux-amd64 \
+#     nfpm pkg -f packaging/linux/nfpm.yaml -p deb -t dist/
+name: gecit
+arch: ${ARCH}
+version: ${VERSION}
+platform: linux
+
+maintainer: Bora Tanrikulu <me@bora.sh>
+description: DPI bypass via fake TLS ClientHello injection, with a built-in DoH resolver
+homepage: https://github.com/boratanrikulu/gecit
+license: GPL-3.0
+section: net
+priority: optional
+
+# No dependencies. The Linux binary is built with CGO_ENABLED=0 and pulls in no
+# pcap: capture_linux.go is a stub because Linux detects connections with eBPF
+# sock_ops.
+
+contents:
+  # `expand: true` is what makes nfpm substitute ${BINARY}. Without it the field
+  # goes straight to the globber and the build fails on a literal "${BINARY}".
+  - src: ${BINARY}
+    expand: true
+    dst: /usr/bin/gecit
+    file_info:
+      mode: 0755
+  # Alpine has no systemd, so the apk carries this file without using it. The
+  # alternative is a per-packager copy of every content entry, which is more to
+  # keep in sync than one unused file is worth.
+  - src: packaging/linux/gecit.service
+    dst: /usr/lib/systemd/system/gecit.service
+    file_info:
+      mode: 0644
+
+scripts:
+  postinstall: packaging/linux/postinstall.sh
+  preremove: packaging/linux/preremove.sh
+  postremove: packaging/linux/postremove.sh
+
+overrides:
+  # rpm passes its scriptlets a count rather than dpkg's verb, and runs the new
+  # %post before the old %preun. preremove-rpm.sh is the same script written to
+  # that order; sharing one would stop the service on every rpm upgrade.
+  rpm:
+    scripts:
+      preremove: packaging/linux/preremove-rpm.sh

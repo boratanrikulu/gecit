@@ -238,7 +238,7 @@ func TestOnlyRunLoadsConfig(t *testing.T) {
 	if rootCmd.PersistentPreRunE != nil {
 		t.Error("a root PersistentPreRunE would gate cleanup, status and service on config parsing")
 	}
-	for _, cmd := range []*cobra.Command{cleanupCmd, statusCmd, configInitCmd, configPathCmd} {
+	for _, cmd := range []*cobra.Command{cleanupCmd, statusCmd, configInitCmd, configPathCmd, versionCmd} {
 		if cmd.PreRunE != nil || cmd.PersistentPreRunE != nil {
 			t.Errorf("%s should not load the config file", cmd.Name())
 		}

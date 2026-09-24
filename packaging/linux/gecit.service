@@ -1,0 +1,21 @@
+[Unit]
+Description=gecit DPI bypass
+Documentation=https://github.com/boratanrikulu/gecit
+After=network-online.target systemd-resolved.service NetworkManager.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/gecit run
+Restart=on-failure
+RestartSec=5s
+
+# No sandboxing. gecit rewrites /etc/resolv.conf, which ProtectSystem= blocks by
+# mounting /etc read-only.
+#
+# No ExecStopPost=gecit cleanup either: platformCleanup is a stub on Linux, so
+# the command prints "nothing to clean up" and does nothing. The SIGTERM that
+# systemd sends is what restores DNS, handled by the run loop itself.
+
+[Install]
+WantedBy=multi-user.target
