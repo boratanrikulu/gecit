@@ -13,7 +13,7 @@ systemctl daemon-reload >/dev/null 2>&1 || true
 # Restarting only what is already running moves a live service onto the new
 # binary without starting one nobody asked for. The test is `is-active` rather
 # than `is-enabled` because an enabled but stopped service should stay stopped.
-if systemctl is-active --quiet gecit.service; then
+if systemctl is-active --quiet gecit.service 2>/dev/null; then
 	systemctl restart gecit.service >/dev/null 2>&1 || true
 fi
 

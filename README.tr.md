@@ -84,8 +84,8 @@ sudo systemctl stop gecit     # DNS'i geri alır
 Paketi kaldırırken önce servis durduruluyor, DNS ayarlarınız da böyle geri
 geliyor. `/etc/gecit/config.yaml` dosyasına dokunulmuyor.
 
-Alpine'da systemd yok, o yüzden apk paketinden sadece binary çıkıyor. `sudo
-gecit run` ile kendiniz çalıştırın, ya da OpenRC servisi yazın.
+Alpine'da systemd yok, yani orada gecit'i sizin yerinize başlatan bir şey
+yok. `sudo gecit run` ile kendiniz çalıştırın, ya da OpenRC servisi yazın.
 
 ### Hazır binary'ler
 
@@ -260,8 +260,8 @@ başlangıçta yenisi yazılır.
 
 ### Config dosyası
 
-Windows'un başlattığı bir servisin komut satırı olmadığı için gecit ayarları
-dosyadan okur. Elle verdiğiniz parametreler yine de dosyadakinin önüne geçer.
+Windows'un ya da systemd'nin başlattığı bir servisin komut satırı olmadığı
+için gecit ayarları dosyadan okur. Elle verdiğiniz parametreler yine de dosyadakinin önüne geçer.
 
 | Platform | Yol |
 |---|---|

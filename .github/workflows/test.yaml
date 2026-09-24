@@ -142,21 +142,52 @@ jobs:
           test "$(systemctl is-enabled gecit.service)" = disabled
           sudo dpkg -r gecit
 
+      # rpm passes %preun a count instead of dpkg's verb, so it gets its own
+      # script. Without the override the rpm would carry the dpkg one and stop
+      # the service on every upgrade, and nothing above would notice.
+      - name: Check the rpm preuninstall script
+        run: |
+          sudo apt-get install -y rpm
+          rpm -qp --scripts dist/gecit_0.0.0_linux_amd64.rpm > /tmp/rpm-scripts
+          if ! grep -qF '[ "${1:-0}" = "0" ] || exit 0' /tmp/rpm-scripts; then
+            cat /tmp/rpm-scripts
+            echo "the rpm does not carry preremove-rpm.sh"
+            exit 1
+          fi
+
+      # The linux binaries stand in for the darwin ones: this checks the tarball
+      # layout the cask's `binary "gecit"` depends on, not what runs on a Mac.
+      - name: Build the macOS tarballs
+        run: |
+          cp bin/gecit-linux-amd64 bin/gecit-darwin-amd64
+          cp bin/gecit-linux-arm64 bin/gecit-darwin-arm64
+          make tarball-darwin VERSION=0.0.0
+          for arch in amd64 arm64; do
+            tar -tzf "dist/gecit_0.0.0_darwin_$arch.tar.gz" | grep -qx gecit
+          done
+
       # Catches a placeholder renamed in the template but not in render.sh, and
       # a tarball that never arrived. Rendered to a file rather than piped: the
       # default shell here is `bash -e` with no pipefail, so a failing render.sh
-      # on the left of a pipe would go unnoticed.
+      # on the left of a pipe would go unnoticed. The checks are `if` rather than
+      # `!`, because `bash -e` does not stop on a failing `!` command.
       - name: Render the Homebrew cask
         run: |
-          mkdir -p dist
-          echo amd64 > dist/darwin_amd64.tar.gz
-          echo arm64 > dist/darwin_arm64.tar.gz
-          packaging/homebrew/render.sh 0.0.0 \
-            dist/darwin_amd64.tar.gz dist/darwin_arm64.tar.gz > /tmp/gecit.rb
+          amd64=dist/gecit_0.0.0_darwin_amd64.tar.gz
+          arm64=dist/gecit_0.0.0_darwin_arm64.tar.gz
+          packaging/homebrew/render.sh 0.0.0 "$amd64" "$arm64" > /tmp/gecit.rb
           cat /tmp/gecit.rb
-          ! grep -q '@@' /tmp/gecit.rb
-          grep -q "$(sha256sum dist/darwin_arm64.tar.gz | cut -d' ' -f1)" /tmp/gecit.rb
-          ! packaging/homebrew/render.sh 0.0.0 dist/darwin_amd64.tar.gz /nope.tar.gz
+          if grep -q '@@' /tmp/gecit.rb; then
+            echo "a placeholder was left in the cask"
+            exit 1
+          fi
+          for tarball in "$amd64" "$arm64"; do
+            grep -q "$(sha256sum "$tarball" | cut -d' ' -f1)" /tmp/gecit.rb
+          done
+          if packaging/homebrew/render.sh 0.0.0 "$amd64" /nope.tar.gz > /dev/null; then
+            echo "render.sh accepted a missing tarball"
+            exit 1
+          fi
 
   bpfvet:
     name: BPF compatibility check

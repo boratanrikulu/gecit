@@ -85,7 +85,7 @@ sudo systemctl stop gecit     # restores DNS
 Removing the package stops the service first, which is what puts your original
 nameservers back. `/etc/gecit/config.yaml` is left in place.
 
-Alpine has no systemd, so the apk is the binary and nothing else. Run
+Alpine has no systemd, so nothing starts gecit for you there. Run
 `sudo gecit run` yourself, or write an OpenRC service for it.
 
 ### Pre-built binaries
@@ -260,8 +260,8 @@ invalidate every URL handed out so far; the next start writes a new one.
 
 ### Config file
 
-A service started by Windows has no command line, so gecit reads settings from
-a file. Flags you pass still win over it.
+A service started by Windows or systemd has no command line, so gecit reads
+settings from a file. Flags you pass still win over it.
 
 | Platform | Path |
 |---|---|

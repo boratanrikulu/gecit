@@ -147,8 +147,8 @@ jobs:
             $version = $Matches[1]
             $rc = if ($Matches[2]) { [int]$Matches[2] } else { 0 }
             if ($Matches[2] -and ($rc -lt 1 -or $rc -gt 65535)) {
-              # Skip rather than fail: the release job needs this one, and a
-              # mistyped tag should still publish its binaries.
+              # Skip rather than fail. The release job's
+              # fail_on_unmatched_files is what stops a release without an MSI.
               Write-Host "candidate number must be 1-65535, got $rc, skipping the MSI"
               "version=" >> $env:GITHUB_OUTPUT
               "label=" >> $env:GITHUB_OUTPUT
@@ -230,6 +230,16 @@ jobs:
           done
           chmod +x bin/*
 
+      # `-X` against a symbol that does not exist is silent, so a renamed
+      # version variable would ship binaries that all print "dev".
+      - name: Check the version stamp
+        run: |
+          got=$(bin/gecit-linux-amd64 version | cut -d' ' -f2)
+          if [ "$got" != "${GITHUB_REF_NAME#v}" ]; then
+            echo "gecit-linux-amd64 reports $got, expected ${GITHUB_REF_NAME#v}"
+            exit 1
+          fi
+
       # dpkg rejects a version that does not start with a digit and rpm rejects
       # one containing a hyphen, so a mistyped tag would otherwise publish
       # packages nobody can install. The MSI job guards its own version the same
@@ -237,7 +247,7 @@ jobs:
       # asset is worse than a missing one.
       - name: Check the tag shape
         run: |
-          if ! echo "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'; then
+          if ! echo "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$'; then
             echo "$GITHUB_REF_NAME is not vX.Y.Z or vX.Y.Z-rc.N"
             exit 1
           fi
